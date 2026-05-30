@@ -1,0 +1,17 @@
+.venv/
+.env
+.env.*
+!.env.example
+.browser-profile/
+dumps/
+*.log
+.DS_Store
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.coverage
+coverage.xml
+htmlcov/
