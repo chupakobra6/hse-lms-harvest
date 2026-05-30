@@ -78,6 +78,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Specific previous dump directory or manifest.json to use for page-cache reuse.",
     )
     harvest.add_argument(
+        "--refresh-start-page",
+        action="store_true",
+        help=(
+            "Always capture the resolved course overview page live, even when page cache "
+            "would reuse it. Useful for fast incremental runs that need only new links."
+        ),
+    )
+    harvest.add_argument(
         "--download-files",
         action="store_true",
         help="Download same-site file links using the logged-in browser session.",

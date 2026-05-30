@@ -47,7 +47,9 @@ async def resolve_course_url(
     logger.log(f"resolving course title {course_title!r} from {safe_url(courses_url)}")
 
     try:
-        await page.goto(courses_url, wait_until="domcontentloaded", timeout=30_000)
+        await page.goto(courses_url, wait_until="commit", timeout=30_000)
+        with suppress_playwright():
+            await page.wait_for_load_state("domcontentloaded", timeout=5_000)
     except PlaywrightError as exc:
         await diagnostics.error(
             "course_list_navigation_failed",

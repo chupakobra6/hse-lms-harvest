@@ -259,6 +259,9 @@ async def run_harvest(args: argparse.Namespace) -> None:
         resolved_start_url = await resolve_course_url(
             page, args.url, args.course_title, debug_dir, logger, screenshots, diagnostics
         )
+        live_refresh_urls = (
+            {strip_fragment(resolved_start_url)} if args.refresh_start_page else set()
+        )
         queue.append(resolved_start_url)
         queued.add(strip_fragment(resolved_start_url))
 
@@ -270,16 +273,20 @@ async def run_harvest(args: argparse.Namespace) -> None:
             visited.add(url_key)
             index = len(pages) + 1
 
-            capture = await maybe_reuse_page(
-                context,
-                url,
-                index,
-                args,
-                page_reuse,
-                out_dir,
-                logger,
-                diagnostics,
-            )
+            capture = None
+            if url_key in live_refresh_urls:
+                logger.log(f"[{index}/{args.max_pages}] refresh start page {safe_url(url)}")
+            else:
+                capture = await maybe_reuse_page(
+                    context,
+                    url,
+                    index,
+                    args,
+                    page_reuse,
+                    out_dir,
+                    logger,
+                    diagnostics,
+                )
             if capture is not None:
                 reused_page_count += 1
                 mark_reused_downloads(capture, downloaded_urls)
@@ -377,7 +384,9 @@ async def ensure_logged_in(
     diagnostics: DiagnosticRecorder,
 ) -> None:
     try:
-        await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
+        await page.goto(start_url, wait_until="commit", timeout=30_000)
+        with suppress(PlaywrightError):
+            await page.wait_for_load_state("domcontentloaded", timeout=5_000)
     except PlaywrightError as exc:
         await diagnostics.error(
             "login_start_navigation_failed",

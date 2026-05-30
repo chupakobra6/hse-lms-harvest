@@ -51,6 +51,7 @@ async def auto_login(
 ) -> Page | None:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     last_url = ""
+    last_recovery_at = 0.0
     submitted = False
 
     while asyncio.get_running_loop().time() < deadline:
@@ -67,6 +68,17 @@ async def auto_login(
             if await fill_login_form(page, username, password, logger, diagnostics):
                 submitted = True
                 await save_screenshot(page, debug_dir, "auth-submitted", logger, screenshots)
+                continue
+
+            now = asyncio.get_running_loop().time()
+            if is_stuck_smart_lms_login(page.url) and now - last_recovery_at > 8:
+                last_recovery_at = now
+                logger.log(
+                    f"auto-login recovering from intermediate login page: {safe_url(page.url)}"
+                )
+                with contextlib_suppress_playwright():
+                    await page.goto(start_url, wait_until="commit", timeout=10_000)
+                    await maybe_click_smart_lms_login(page, logger)
 
         await asyncio.sleep(2 if submitted else 1)
 
@@ -87,6 +99,23 @@ async def auto_login(
             details={"timeout_seconds": timeout_seconds},
         )
     return None
+
+
+def is_stuck_smart_lms_login(url: str) -> bool:
+    lower = url.lower()
+    return "/login/hselogin.php" in lower
+
+
+async def maybe_click_smart_lms_login(page: Page, logger: RunLogger) -> None:
+    for selector in ('button:has-text("Войти")', 'a:has-text("Войти")', 'input[value*="Войти" i]'):
+        locator = page.locator(selector)
+        try:
+            if await locator.count() > 0 and await locator.first.is_visible(timeout=1_000):
+                await locator.first.click(timeout=2_000)
+                logger.log("auto-login clicked Smart LMS login")
+                return
+        except PlaywrightError:
+            continue
 
 
 async def fill_login_form(
