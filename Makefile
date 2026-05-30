@@ -17,18 +17,18 @@ setup:
 	uv sync --extra dev
 
 test:
-	uv run pytest
+	uv run --extra dev pytest
 
 lint:
-	uv run ruff check .
+	uv run --extra dev ruff check .
 
 format:
-	uv run ruff format .
+	uv run --extra dev ruff format .
 
 check:
-	uv run ruff format --check .
-	uv run ruff check .
-	uv run pytest
+	uv run --extra dev ruff format --check .
+	uv run --extra dev ruff check .
+	uv run --extra dev pytest
 
 doctor:
 	uv run hse-lms-harvest --help >/dev/null

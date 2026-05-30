@@ -183,7 +183,7 @@ def test_restore_inline_link_markdown_omits_personal_submission_file_links() -> 
     text = "Ответ: ⟦HSE_LMS_LINK_0⟧"
     raw_links = [
         {
-            "text": "ЛР1_Кошенский_ИМ.docx",
+            "text": "personal_submission.docx",
             "href": (
                 "https://edu.hse.ru/pluginfile.php/1/assignsubmission_file/"
                 "submission_files/2/my-answer.docx?forcedownload=1"

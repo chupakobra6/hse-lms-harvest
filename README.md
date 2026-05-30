@@ -7,7 +7,7 @@
 ## Установка
 
 ```bash
-cd /Users/igor/projects/hse-lms-harvest
+cd hse-lms-harvest
 uv sync --extra dev
 ```
 
