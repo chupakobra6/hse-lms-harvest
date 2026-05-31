@@ -1,53 +1,67 @@
-# hse-lms-harvest
+<h1 align="center">hse-lms-harvest</h1>
 
-Локальный сборщик страниц HSE Smart LMS. Он открывает отдельный браузерный профиль, умеет автоматически обновлять вход через `.env` и сохраняет видимый текст страниц, ссылки, кнопки, вероятные вложения, скачанные файлы и `manifest.json` для дальнейшей работы агента.
+<p align="center">
+  Read-only Smart LMS course page and attachment harvester for local study automation.
+</p>
 
-Пароли в код не передаются. `.env`, профиль браузера и дампы исключены из git.
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white">
+  <img alt="Playwright" src="https://img.shields.io/badge/Playwright-browser%20automation-2EAD33?logo=playwright&logoColor=white">
+  <img alt="uv" src="https://img.shields.io/badge/uv-package%20manager-DE5FE9">
+  <img alt="Read only" src="https://img.shields.io/badge/default-read--only-0E7C7B">
+</p>
 
-## Установка
+<p align="center">
+  <a href="#why">Why</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#capture-output">Capture output</a> ·
+  <a href="#safety">Safety</a> ·
+  <a href="#repository-map">Repository map</a>
+</p>
+
+## Why
+
+`hse-lms-harvest` opens Smart LMS pages through a local browser profile and turns course pages into
+agent-friendly files: compact Markdown navigation, full JSON page captures, downloaded study
+attachments, and structured diagnostics.
+
+The default workflow is conservative. It reads visible course content, opens read-only assignment
+detail pages when they contain task text, and avoids form submission or course-state mutation.
+
+| Capability | What it gives |
+| --- | --- |
+| Browser-backed capture | Uses the same authenticated pages a student can already access. |
+| Compact Markdown layer | `navigation.md`, `summary.md`, and `pages/*.md` are optimized for fast agent reads. |
+| Full JSON layer | `manifest.json` and `pages/*.json` keep complete links, buttons, file metadata, and errors. |
+| Attachment handling | Same-site study files, including Moodle `pluginfile.php`, can be downloaded with caching. |
+| Privacy filters | Personal submission files, grades, messages, calendars, and report/detail noise are excluded. |
+| Local diagnostics | Errors are written as structured bundles without saving full HTML by default. |
+
+## Quick Start
 
 ```bash
 cd hse-lms-harvest
 uv sync --extra dev
-```
-
-Стандартные команды проекта также доступны через `make`, как в соседних tooling-репозиториях:
-
-```bash
-make help
-make setup
-make test
-make lint
 make check
 ```
 
-По умолчанию используется установленный Google Chrome через Playwright. Если нужно именно bundled Chromium:
-
-```bash
-uv run python -m playwright install chromium
-```
-
-и дальше добавляй `--browser-channel chromium`.
-
-## Секреты
+Set credentials without writing them to shell history:
 
 ```bash
 uv run hse-lms-harvest credentials set \
-  --username "student@edu.hse.ru" \
+  --username "student@example.edu" \
   --env-file ".env" \
   --password-stdin
 ```
 
-`.env` создаётся в корне проекта с правами `0600` и не попадает в git.
-
-## Сбор курса
+Run a course capture:
 
 ```bash
 uv run hse-lms-harvest harvest \
   --url "https://edu.hse.ru/my/courses.php" \
   --profile ".browser-profile" \
   --out "dumps" \
-  --course-title "Проектный семинар" \
+  --course-title "Course title" \
   --max-pages 260 \
   --download-files \
   --ensure-login \
@@ -55,75 +69,44 @@ uv run hse-lms-harvest harvest \
   --headless
 ```
 
-Аудио, видео, личные отправленные ответы из `assignsubmission_file/submission_files` и служебные файлы конференций вроде `chat.txt`, `playback.m3u`, `audio_only.*` и `zoom_*` не скачиваются по умолчанию. Личные submission-ссылки, оценки, календарь, сообщения и вторичные LMS detail/report links (`quiz/review.php`, `h5pactivity/report.php`, `glossary/showentry.php`) убираются из capture text и `links`, чтобы агент видел материалы курса, а не приватный или навигационный шум. Для редкого полного архива медиа добавляй `--download-media`.
-Учебные вложения с LMS file-server скачиваются при `--download-files`; если нужен режим "только записать ссылки, но не скачивать эти вложения", добавляй `--skip-lms-file-server`.
-Один скачиваемый файл ограничен 80 MiB; если реально нужен крупный PDF/архив, подними лимит через `--max-file-mb 200` или отключи его через `--max-file-mb 0`.
-Перед скачиванием файла сборщик делает быстрый `HEAD`-запрос: заранее отсекает видео/аудио, HTML-страницы и слишком большие файлы, не загружая тело ответа. Таймаут проверки короткий по умолчанию (`1500` ms) и задаётся через `--file-head-timeout-ms`; для максимально быстрого, но менее проверенного прохода можно поставить `--file-head-timeout-ms 0`.
-Повторные запуски используют persistent-кеш вложений `dumps/_file-cache`: если `ETag`, `Last-Modified`, размер или тип файла совпали, файл берётся из кеша и кладётся в новый дамп через hard link/copy без повторного скачивания. Отключить можно через `--no-file-cache`, перенести кеш — через `--file-cache-dir`. Для повторного локального прогона по уже проверенному дампу можно добавить `--trust-file-cache`, тогда cached URLs берутся из кеша без нового `HEAD`.
-Страницы тоже можно переиспользовать из предыдущего `manifest.json`: дефолтный `--page-cache validate` пропускает страницу только если HTTP-валидаторы страницы совпали. Сначала пробуется `HEAD`, а если LMS не отвечает на него, делается лёгкий GET metadata-probe без браузерного рендера. `--page-cache trust` переиспользует страницу по URL без сетевой проверки и подходит только для быстрых локальных повторов, когда ты сознательно принимаешь риск пропустить свежие изменения. Конкретный старый дамп можно указать через `--reuse-dump path/to/manifest.json`.
-Проверка и скачивание вложений идут параллельно с лимитом `--download-concurrency 6`; если LMS начнёт отвечать нестабильно, уменьши до `2`, если сеть нормальная и файлов много — можно поднять до `10`. Таймаут самого скачивания задаётся через `--file-download-timeout-ms`.
-Страницы открываются до `domcontentloaded`; общее ожидание фоновой тишины LMS по умолчанию отключено ради скорости. Для корневых страниц курса отдельно действует короткое `--course-network-idle-timeout-ms 1000`, потому что оглавление курса часто догружается лениво. Если на конкретном вложенном модуле контент тоже догружается поздно, добавь общий флаг `--network-idle-timeout-ms 1000`.
-Во время чтения страниц сборщик по умолчанию блокирует тяжёлые page assets: картинки, видео/аудио и шрифты. Если нужны визуально полные debug-скриншоты, добавляй `--load-page-assets`.
-Скриншоты по умолчанию сохраняются только для ключевых мест входа/выбора курса и ошибок, в JPEG, с лимитом по количеству. Полный скриншот каждой страницы включается только через `--screenshot-mode every-page`.
-Ошибки пишутся в структурированную диагностику: `debug/events.jsonl`, `debug/errors.md`, `debug/errors.json` и отдельные папки `debug/errors/<id>/` со скриншотом и компактным `page-state.json`. По умолчанию HTML страницы не сохраняется; если нужно разобрать сложный UI-баг, включай `--debug-dump-mode verbose`. Если диагностика вообще не нужна, можно поставить `--debug-dump-mode off` и `--screenshot-mode off`.
+For command discovery:
 
-Результат будет в новой папке `dumps/<host>-YYYYMMDD-HHMMSS/`:
+```bash
+make help
+uv run hse-lms-harvest --help
+```
 
-- `manifest.json` — машинно читаемый источник правды;
-- `navigation.md` — компактная карта локальных `pages/*.md`, `pages/*.json` и скачанных файлов;
-- `navigation.json` — машинно читаемая версия карты без LMS URL;
-- `summary.md` — короткая сводка без URL страниц и внутренних индексов;
-- `pages/*.md` — компактный текст страницы без повторяющихся навигационных строк, служебных URL, id/hash и action-ссылок;
-- `pages/*.json` — полная структура страницы: текст, ссылки, кнопки, ошибки;
-- `files/` — скачанные вложения, если включен `--download-files`.
-- `debug/screenshots/` — только ключевые/ошибочные скриншоты в JPEG; не снимок каждой страницы.
-- `debug/errors.md` — короткий индекс ошибок с путями к диагностическим артефактам.
+## Capture Output
 
-`navigation.md` удобно давать агенту первым: он показывает дерево захваченных страниц, локальные пути к Markdown/JSON каждой страницы и индекс скачанных вложений. Текст в `pages/*.md` сохраняет смысл гиперссылок прямо в строке, но без URL-таргетов: `[Презентация](https://...)` превращается в `Презентация`. Разделы `Links`, `Buttons` и `Downloaded files` в Markdown тоже пишутся в компактном виде без служебных адресов и хешей; полный список ссылок, кнопок, источников и checksum остаётся в `pages/*.json` и `manifest.json`.
-Диагностику из `debug/` обычно не нужно передавать агенту целиком. Начинай с `debug/errors.md`, а конкретный `debug/errors/<id>/page-state.json` или скриншот открывай только для нужной ошибки.
+A run writes a new `dumps/<host>-YYYYMMDD-HHMMSS/` directory:
 
-## Миграция существующих дампов
+| Path | Purpose |
+| --- | --- |
+| `manifest.json` | Machine-readable source of truth after capture-level filters. |
+| `navigation.md` | First file to give an agent: page tree plus local Markdown/JSON/file pointers. |
+| `navigation.json` | Machine-readable navigation without LMS URLs. |
+| `summary.md` | Short human/agent summary without internal indexes. |
+| `pages/*.md` | Compact page text without repeated navigation lines, service URLs, hashes, or action URLs. |
+| `pages/*.json` | Full page structure: text, links, buttons, downloaded file records, and errors. |
+| `files/` | Downloaded attachments when `--download-files` is enabled. |
+| `debug/errors.md` | Short error index with pointers to structured diagnostic bundles. |
 
-Если поменялся только формат Markdown/navigation/manifest, не нужно заново ходить в LMS. Пересобери локальные файлы из уже сохранённого `manifest.json`:
+If only the output format changed, reuse an existing dump instead of hitting LMS again:
 
 ```bash
 uv run hse-lms-harvest migrate --out dumps/current-subjects
 ```
 
-Команда рекурсивно обновляет все найденные `manifest.json` под `--out`. Для одиночного корня с несколькими историческими дампами можно добавить `--latest-only`, чтобы обновить только самый свежий manifest. Миграция не скачивает файлы и не открывает страницы; она только пересчитывает `pages/*.md`, `pages/*.json`, `summary.md`, `navigation.*` и служебные поля manifest.
+## Safety
 
-## Детали заданий
+- `.env`, `.browser-profile/`, `dumps/`, browser cookies, screenshots, and logs are ignored by git.
+- The harvester does not click `Save`, `Submit`, `Delete`, or similar state-changing controls.
+- `--allow-state-changes` only permits explicit completion toggles; save/submit/delete stays blocked.
+- Audio/video and conference artifacts are skipped by default; use `--download-media` only when you intentionally need them.
+- Personal submission files under `assignsubmission_file/submission_files` are not downloaded and are removed from compact capture text.
+- Tests use local fixtures and `about:blank`; they do not call a live LMS.
 
-Smart LMS иногда прячет нужную информацию за ссылками вроде "Добавить ответ на задание". Сборщик по умолчанию открывает такие страницы для чтения, потому что без этого часть условий задания может не попасть в дамп.
-
-Для аккуратного чтения таких страниц:
-
-```bash
-uv run hse-lms-harvest harvest \
-  --url "https://edu.hse.ru/course/view.php?id=..." \
-  --profile ".browser-profile" \
-  --download-files \
-  --ensure-login
-```
-
-Сборщик не нажимает `Сохранить`, `Отправить`, `Удалить` и похожие кнопки. Флаг `--allow-state-changes` разрешает только явные completion-toggle элементы вроде `Отметить как выполнено`; страницы `Добавить ответ` читаются без отправки формы. Если нужно отключить такое открытие, добавь `--skip-action-pages`.
-
-Если Smart LMS не сохраняет сессию после закрытия браузера, запускай сразу `harvest --ensure-login`: ты логинишься один раз, а сбор начинается в том же браузерном контексте без повторного входа.
-
-## Очистка
-
-```bash
-uv run hse-lms-harvest cleanup --all --out dumps --profile .browser-profile
-```
-
-Команда удаляет debug-скриншоты, скачанные аудио/видео, служебные conference artifacts и rebuildable browser/cache/component artifacts Chrome, но не удаляет `.env`, cookies и полезные документы/PDF/DOCX/XLSX.
-Кеш вложений намеренно не входит в `--all`, потому что ускоряет повторные сборы. Если нужно полностью освободить место от него:
-
-```bash
-uv run hse-lms-harvest cleanup --file-cache
-```
-
-## Проверка проекта
+## Testing
 
 ```bash
 make check
@@ -131,23 +114,18 @@ make doctor
 make smoke
 ```
 
-`make smoke` использует `about:blank` и временные директории в `/tmp`, поэтому не ходит в LMS и не требует авторизации.
+`make smoke` runs against `about:blank` with temporary paths, so it does not require LMS access.
 
-## Структура репозитория
+## Repository Map
 
-- `src/hse_lms_harvest/cli_args.py` — argparse-схема команд и defaults.
-- `src/hse_lms_harvest/cli.py` — CLI entrypoint, команды и Playwright orchestration.
-- `src/hse_lms_harvest/capture.py` — чтение страниц, inline-ссылки, read-only action/detail pages.
-- `src/hse_lms_harvest/classify.py` — классификация ссылок, файлов, медиа, unsafe navigation и личных submission-файлов.
-- `src/hse_lms_harvest/downloads.py` — скачивание вложений, HEAD-проверки, лимиты, file cache.
-- `src/hse_lms_harvest/page_cache.py` — reuse страниц из предыдущих manifest через `--page-cache`.
-- `src/hse_lms_harvest/manifest.py` и `render.py` — manifest, миграции и компактный Markdown/navigation слой.
-- `src/hse_lms_harvest/debug.py` — структурированные события, ошибки и скриншоты.
-- `tests/` — unit-тесты публичных контрактов без живых LMS-запросов.
-- `dumps/`, `.browser-profile/`, `.env`, `.venv/` — локальные приватные артефакты, исключены из git.
-
-## Безопасность
-
-- Не коммить `.env`, `.browser-profile`, `dumps`, cookies, скриншоты личного кабинета и логи с приватными URL.
-- Не запускай сбор с `--allow-state-changes`, если не хочешь менять состояние курса.
-- Для передачи агенту обычно начинай с `navigation.md`, затем при необходимости давай `summary.md`, нужные `pages/*.md` и скачанные учебные файлы. Полная структура остаётся в `manifest.json` и `pages/*.json`.
+| Path | Purpose |
+| --- | --- |
+| `src/hse_lms_harvest/cli.py` | CLI entrypoint, Playwright orchestration, and page queue. |
+| `src/hse_lms_harvest/cli_args.py` | Command arguments, defaults, and help text. |
+| `src/hse_lms_harvest/capture.py` | Page text, inline links, and read-only action/detail pages. |
+| `src/hse_lms_harvest/classify.py` | URL/file/media classification and unsafe navigation filters. |
+| `src/hse_lms_harvest/downloads.py` | Attachment downloads, HEAD checks, size limits, and file cache. |
+| `src/hse_lms_harvest/manifest.py` | Manifest loading, migration, fingerprints, and page-cache helpers. |
+| `src/hse_lms_harvest/render.py` | `manifest.json`, navigation files, page JSON, and compact Markdown. |
+| `src/hse_lms_harvest/privacy.py` | URL and diagnostic redaction helpers. |
+| `tests/` | Unit tests for public contracts without live LMS calls. |
