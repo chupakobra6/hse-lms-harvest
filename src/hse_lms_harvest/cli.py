@@ -30,6 +30,7 @@ from .debug import (
     DiagnosticRecorder,
     RunLogger,
     ScreenshotPolicy,
+    safe_error,
     safe_url,
     save_screenshot,
 )
@@ -341,7 +342,7 @@ async def run_harvest(args: argparse.Namespace) -> None:
                     queue.append(link.url)
                     queued.add(link_key)
 
-        await context.close()
+        await close_context(context, logger, diagnostics)
 
     manifest = {
         "format_version": FORMAT_VERSION,
@@ -373,6 +374,30 @@ async def run_harvest(args: argparse.Namespace) -> None:
         raise RuntimeError("; ".join(errors))
 
 
+async def close_context(
+    context: BrowserContext,
+    logger: RunLogger,
+    diagnostics: DiagnosticRecorder,
+    *,
+    timeout_seconds: int = 10,
+) -> None:
+    logger.log("closing browser context")
+    close_task = asyncio.create_task(context.close())
+    try:
+        await asyncio.wait_for(close_task, timeout=timeout_seconds)
+    except (TimeoutError, PlaywrightError) as exc:
+        close_task.cancel()
+        with suppress(BaseException):
+            await close_task
+        exception = safe_error(exc) or type(exc).__name__
+        logger.log(f"browser context close warning: {exception}")
+        diagnostics.warning(
+            "browser_context_close_warning",
+            "Browser context close did not finish before timeout; continuing to save dump",
+            details={"timeout_seconds": timeout_seconds, "exception": exception},
+        )
+
+
 async def ensure_logged_in(
     context: BrowserContext,
     page: Page,
@@ -388,14 +413,15 @@ async def ensure_logged_in(
         with suppress(PlaywrightError):
             await page.wait_for_load_state("domcontentloaded", timeout=5_000)
     except PlaywrightError as exc:
-        await diagnostics.error(
-            "login_start_navigation_failed",
-            "Failed to open start URL before login check",
-            page=page,
+        logger.log(f"login start navigation warning for {safe_url(start_url)}: {safe_error(exc)}")
+        diagnostics.warning(
+            "login_start_navigation_warning",
+            "Start URL navigation failed before login check; continuing with current page state",
             url=start_url,
-            exc=exc,
+            details={"exception": safe_error(exc)},
         )
-        raise
+        with suppress(PlaywrightError):
+            await page.wait_for_load_state("domcontentloaded", timeout=2_000)
     if await page_looks_logged_in(page, start_url):
         logger.log(f"already logged in at {safe_url(page.url)}")
         return
