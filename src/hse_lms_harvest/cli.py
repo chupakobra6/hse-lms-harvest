@@ -181,6 +181,7 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
         "основные блоки контента",
         "требуемые условия завершения",
         "состояние ответа",
+        "мои работы (вкр/кр/проект)",
     )
     if any(marker in lower_text for marker in logged_in_markers):
         return True
