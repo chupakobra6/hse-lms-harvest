@@ -171,10 +171,11 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
             return False
 
         text = await page.locator("body").inner_text(timeout=1_000)
+        title = await page.title()
     except PlaywrightError:
         return False
 
-    lower_text = text.lower()
+    lower_text = f"{title}\n{text}".lower()
     logged_in_markers = (
         "мои курсы",
         "вы зашли под именем",
@@ -182,6 +183,9 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
         "требуемые условия завершения",
         "состояние ответа",
         "мои работы (вкр/кр/проект)",
+        "загрузка работы",
+        "список работ",
+        "файл работы",
     )
     if any(marker in lower_text for marker in logged_in_markers):
         return True

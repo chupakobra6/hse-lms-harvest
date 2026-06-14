@@ -36,6 +36,14 @@ SUBMIT_SELECTORS = (
     'button:has-text("Next")',
 )
 
+HSE_SSO_LOGIN_SELECTORS = (
+    'button:has-text("Войти через ЕЛК")',
+    'a:has-text("Войти через ЕЛК")',
+    'input[value*="Войти через ЕЛК"]',
+    'button:has-text("ЕЛК")',
+    'a:has-text("ЕЛК")',
+)
+
 
 async def auto_login(
     context: BrowserContext,
@@ -68,6 +76,11 @@ async def auto_login(
             if await fill_login_form(page, username, password, logger, diagnostics):
                 submitted = True
                 await save_screenshot(page, debug_dir, "auth-submitted", logger, screenshots)
+                continue
+
+            if await maybe_click_hse_sso_login(page, logger):
+                submitted = True
+                await save_screenshot(page, debug_dir, "auth-sso-clicked", logger, screenshots)
                 continue
 
             now = asyncio.get_running_loop().time()
@@ -116,6 +129,21 @@ async def maybe_click_smart_lms_login(page: Page, logger: RunLogger) -> None:
                 return
         except PlaywrightError:
             continue
+
+
+async def maybe_click_hse_sso_login(page: Page, logger: RunLogger) -> bool:
+    for selector in HSE_SSO_LOGIN_SELECTORS:
+        locator = page.locator(selector)
+        try:
+            if await locator.count() > 0 and await locator.first.is_visible(timeout=1_000):
+                await locator.first.click(timeout=2_000)
+                logger.log("auto-login clicked HSE SSO login")
+                with contextlib_suppress_playwright():
+                    await page.wait_for_load_state("domcontentloaded", timeout=8_000)
+                return True
+        except PlaywrightError:
+            continue
+    return False
 
 
 async def fill_login_form(

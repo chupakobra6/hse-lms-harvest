@@ -12,13 +12,17 @@ class FakeLocator:
 
 
 class FakePage:
-    def __init__(self, url: str, text: str) -> None:
+    def __init__(self, url: str, text: str, title: str = "") -> None:
         self.url = url
         self.text = text
+        self.title_text = title
 
     def locator(self, selector: str) -> FakeLocator:
         assert selector == "body"
         return FakeLocator(self.text)
+
+    async def title(self) -> str:
+        return self.title_text
 
 
 def test_harvest_opens_action_pages_by_default() -> None:
@@ -53,3 +57,18 @@ def test_lms_hse_work_list_page_counts_as_logged_in() -> None:
     )
 
     assert asyncio.run(page_looks_logged_in(page, "https://lms.hse.ru/?ap_list="))
+
+
+def test_lms_hse_work_detail_page_counts_as_logged_in() -> None:
+    page = FakePage(
+        "https://lms.hse.ru/?ap=&h_id=198E69F5-3D9F-499A-A062-BE98B54D3462",
+        "Список работ\nФайл работы\nФайл презентации\nФайл приложения",
+        title="Загрузка работы",
+    )
+
+    assert asyncio.run(
+        page_looks_logged_in(
+            page,
+            "https://lms.hse.ru/?ap=&h_id=198E69F5-3D9F-499A-A062-BE98B54D3462",
+        )
+    )
