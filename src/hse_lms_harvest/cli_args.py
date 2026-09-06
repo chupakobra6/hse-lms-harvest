@@ -190,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     harvest.add_argument(
         "--env-file",
         default=str(DEFAULT_ENV_FILE),
-        help="Project .env file with HSE_LMS_USERNAME and HSE_LMS_PASSWORD.",
+        help="Project .env file with username and credential-helper configuration.",
     )
     harvest.add_argument(
         "--course-title",
@@ -232,9 +232,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     credentials_subparsers = credentials.add_subparsers(dest="credentials_command", required=True)
     credentials_set = credentials_subparsers.add_parser(
-        "set", help="Store credentials in a local 0600 env file."
+        "set", help="Store the password through a credential helper and save non-secret config."
     )
     credentials_set.add_argument("--username", required=True)
+    credentials_set.add_argument(
+        "--credential-helper",
+        required=True,
+        type=Path,
+        help="Absolute path to the noninteractive JSON credential helper executable.",
+    )
     credentials_set.add_argument(
         "--env-file",
         default=str(DEFAULT_ENV_FILE),

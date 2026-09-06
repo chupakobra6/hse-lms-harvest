@@ -45,14 +45,32 @@ uv sync --extra dev
 make check
 ```
 
-Set credentials without writing them to shell history:
+Store the password through an installed credential helper. The command prompts without echo;
+`.env` contains only the username, helper path and service name:
 
 ```bash
 uv run hse-lms-harvest credentials set \
   --username "student@example.edu" \
-  --env-file ".env" \
-  --password-stdin
+  --credential-helper "/absolute/path/to/study-keychain" \
+  --env-file ".env"
 ```
+
+The helper is an external executable; its absolute path is required at setup and saved as
+`HSE_LMS_CREDENTIAL_HELPER`. It must exchange one JSON request/response through stdin/stdout:
+requests use `operation` (`get`, `put`, `check`, `delete`), `account`, and `service`
+(`codex-study-lms`); `put` also receives `secret`. A successful `get` returns `secret`, other
+successful operations return `{}`. Errors use an `error` code: `not-found`, `locked`,
+`interaction-required`, `access-denied`, or `user-canceled`. The helper must disable interactive approval by default; calls
+time out after 10 seconds. Passwords never enter helper arguments, inherited secret environment
+variables or diagnostics. `credentials set --password-stdin` supports provisioning from a process
+that supplies the password on stdin.
+
+`credentials status --env-file .env` checks availability without requesting the password;
+`credentials delete --env-file .env` removes the stored secret and its local configuration.
+`HSE_LMS_PASSWORD` is no longer read from `.env` or the environment. To migrate, run
+`credentials set` with the existing password: the old `.env` entry is removed after helper
+write/readback succeeds. Headless auto-login reports unavailable credentials or failed login
+without falling into a manual-login wait.
 
 Run a course capture:
 

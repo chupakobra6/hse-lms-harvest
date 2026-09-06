@@ -19,6 +19,7 @@ from .cleanup import run_cleanup
 from .cli_args import build_parser
 from .course import resolve_course_url
 from .credentials import (
+    CredentialError,
     credentials_status,
     delete_password,
     load_default_username,
@@ -68,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130
+    except CredentialError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     return 0
 
 
@@ -75,8 +79,8 @@ def run_credentials(args: argparse.Namespace) -> None:
     env_file = Path(args.env_file)
     if args.credentials_command == "set":
         password = read_password_from_user(password_stdin=args.password_stdin)
-        store_password(args.username, password, env_file)
-        print(credentials_status(env_file))
+        store_password(args.username, password, env_file, credential_helper=args.credential_helper)
+        print(f"Credentials stored and verified for {args.username} through the configured helper.")
         return
     if args.credentials_command == "status":
         print(credentials_status(env_file))
@@ -437,7 +441,11 @@ async def ensure_logged_in(
     if args.auto_login:
         env_file = Path(args.env_file)
         username = args.username or load_default_username(env_file)
-        password = load_password(username, env_file)
+        try:
+            password = load_password(username, env_file)
+        except CredentialError as exc:
+            await diagnostics.error("credential_unavailable", str(exc))
+            raise
         if username and password:
             logger.log(f"auto-login using stored credentials for {username}")
             logged_in_page = await auto_login(
@@ -456,6 +464,15 @@ async def ensure_logged_in(
                 logger.log(f"login detected at {safe_url(logged_in_page.url)}")
                 return
         logger.log("auto-login requested but stored credentials were not available")
+
+        if args.headless:
+            await diagnostics.error(
+                "auto_login_unavailable",
+                "Headless auto-login did not establish a session; repair credentials or the login flow",
+            )
+            raise CredentialError(
+                "Headless auto-login failed; manual login cannot run in background."
+            )
 
     logger.log("manual login is needed; waiting in the same browser session")
     logged_in_page = await wait_for_logged_in(context, start_url, args.auth_timeout)
