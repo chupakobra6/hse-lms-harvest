@@ -51,6 +51,7 @@ def test_detects_personal_submission_files() -> None:
 
 def test_detects_capture_ignored_lms_noise() -> None:
     assert is_ignored_capture_url("https://edu.hse.ru/grade/report/index.php?id=1")
+    assert is_ignored_capture_url("https://edu.hse.ru/local/mail/view.php?t=inbox")
     assert is_ignored_capture_url("https://edu.hse.ru/mod/glossary/showentry.php?eid=1")
     assert is_ignored_capture_url("https://edu.hse.ru/mod/quiz/review.php?attempt=1&cmid=2")
     assert is_ignored_capture_url("https://edu.hse.ru/mod/h5pactivity/report.php?a=1&userid=2")

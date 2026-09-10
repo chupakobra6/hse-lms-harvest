@@ -110,6 +110,7 @@ STATE_CHANGE_MARKERS = (
 UNSAFE_PATH_PARTS = (
     "/user/",
     "/calendar/",
+    "/local/mail/",
     "/message/",
     "/grade/report/",
 )

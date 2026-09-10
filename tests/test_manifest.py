@@ -35,10 +35,12 @@ def test_page_from_data_prunes_ignored_capture_links_from_old_manifests() -> Non
             "heading": "Course",
             "text_lines": [
                 "[Оценки](https://edu.hse.ru/grade/report/index.php?id=1)",
+                "[2](https://edu.hse.ru/local/mail/view.php?t=inbox)",
                 "Материал: [Презентация](https://edu.hse.ru/mod/resource/view.php?id=10)",
             ],
             "links": [
                 {"text": "Оценки", "url": "https://edu.hse.ru/grade/report/index.php?id=1"},
+                {"text": "2", "url": "https://edu.hse.ru/local/mail/view.php?t=inbox"},
                 {
                     "text": "Презентация",
                     "url": "https://edu.hse.ru/mod/resource/view.php?id=10",
@@ -67,6 +69,32 @@ def test_page_from_data_prunes_ignored_capture_links_from_old_manifests() -> Non
         "files/task.pdf sha256:def source:"
         "https://edu.hse.ru/pluginfile.php/1/mod_resource/content/0/task.pdf"
     ]
+
+
+def test_internal_mail_badge_does_not_change_page_fingerprint() -> None:
+    def page_with_mail_label(label: str):
+        return page_from_data(
+            {
+                "index": 1,
+                "url": "https://edu.hse.ru/mod/assign/view.php?id=1",
+                "title": "Задание | Smart LMS",
+                "heading": "Задание",
+                "text_lines": [
+                    f"[{label}](https://edu.hse.ru/local/mail/view.php?t=inbox)",
+                    "Срок сдачи: 14 сентября 2026, 23:59",
+                ],
+                "links": [
+                    {
+                        "text": label,
+                        "url": "https://edu.hse.ru/local/mail/view.php?t=inbox",
+                    }
+                ],
+            }
+        )
+
+    assert page_content_fingerprint(page_with_mail_label("2")) == page_content_fingerprint(
+        page_with_mail_label("Mail")
+    )
 
 
 def test_metadata_matches_prefers_etag_then_last_modified() -> None:
