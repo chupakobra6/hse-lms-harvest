@@ -2,8 +2,7 @@ import json
 from types import SimpleNamespace
 
 from hse_lms_harvest.debug import RunLogger
-from hse_lms_harvest.model import PageCapture
-from hse_lms_harvest.page_cache import load_page_reuse_index, mark_reused_downloads
+from hse_lms_harvest.page_cache import load_page_reuse_index
 
 
 def test_load_page_reuse_index_maps_url_and_final_url(tmp_path) -> None:
@@ -43,25 +42,3 @@ def test_load_page_reuse_index_can_be_disabled(tmp_path) -> None:
         load_page_reuse_index(args, tmp_path, tmp_path / "current", RunLogger(tmp_path / "log"))
         is None
     )
-
-
-def test_mark_reused_downloads_tracks_source_urls_without_fragments() -> None:
-    downloaded_urls: set[str] = set()
-
-    mark_reused_downloads(
-        PageCapture(
-            index=1,
-            url="https://edu.hse.ru/course/view.php?id=1",
-            final_url="https://edu.hse.ru/course/view.php?id=1",
-            title="Course",
-            heading="Course",
-            text_lines=[],
-            downloaded_files=[
-                "files/task.pdf sha256:abc source:https://edu.hse.ru/pluginfile.php/1/task.pdf#frag",
-                "files/no-source.pdf",
-            ],
-        ),
-        downloaded_urls,
-    )
-
-    assert downloaded_urls == {"https://edu.hse.ru/pluginfile.php/1/task.pdf"}

@@ -32,6 +32,7 @@ class PageCapture:
     buttons: list[Button] = field(default_factory=list)
     downloaded_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    capture_contract: dict[str, object] = field(default_factory=dict)
     source_metadata: dict[str, str] = field(default_factory=dict)
     content_fingerprint: str = ""
     reused_from: str = ""

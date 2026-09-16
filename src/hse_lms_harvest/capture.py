@@ -11,6 +11,7 @@ from playwright.async_api import BrowserContext, Page
 from playwright.async_api import Error as PlaywrightError
 
 from .classify import classify_link, is_ignored_capture_url, looks_like_course_link
+from .coverage import capture_contract
 from .debug import DiagnosticRecorder, RunLogger, ScreenshotPolicy, safe_error, save_screenshot
 from .downloads import download_files
 from .file_cache import FileCache
@@ -201,10 +202,21 @@ async def capture_page(
         text_lines=[],
     )
 
+    diagnostic_start = len(diagnostics.errors)
+    capture.capture_contract = capture_contract(args)
     try:
         response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         if response is not None:
             capture.source_metadata = response_metadata(response.headers)
+            if not response.ok:
+                capture.errors.append(f"navigation: HTTP {response.status}")
+                await diagnostics.error(
+                    "page_http_error",
+                    "Page returned an unsuccessful HTTP status",
+                    page_index=index,
+                    url=url,
+                    details={"status": response.status},
+                )
     except PlaywrightError as exc:
         capture.errors.append(f"navigation: {safe_error(exc)}")
         logger.log(f"navigation warning for {redact_url(url)}: {safe_error(exc)}")
@@ -262,6 +274,12 @@ async def capture_page(
 
     final_url = page.url
     capture.final_url = redact_url(final_url) if has_sensitive_query(final_url) else final_url
+    if strip_fragment(final_url) != strip_fragment(url):
+        # Initial HTML validators cannot validate a different page opened by a control.
+        capture.source_metadata = {}
+    if any(part in urlparse(final_url).path.lower() for part in ("/login", "/auth/", "/sso")):
+        capture.errors.append("navigation: login page instead of requested content")
+        await diagnostics.error("page_requires_login", "Capture reached a login page", url=url)
     capture.title = data.get("title") or await page.title()
     capture.heading = data.get("heading") or capture.title
     raw_links = data.get("links") or []
@@ -290,6 +308,13 @@ async def capture_page(
             diagnostics,
         )
 
+    for error in diagnostics.errors[diagnostic_start:]:
+        if error.get("code") not in {
+            "file_download_failed",
+            "file_download_http_error",
+            "file_download_html",
+        }:
+            capture.errors.append(f"capture: {error['code']}")
     return capture
 
 

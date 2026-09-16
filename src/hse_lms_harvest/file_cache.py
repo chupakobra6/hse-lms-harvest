@@ -24,21 +24,32 @@ class FileCache:
         self.files_dir = self.root / "files"
         self.index_path = self.root / "index.json"
         self.index: dict[str, dict[str, object]] = self._load_index()
+        self._verified: dict[Path, tuple[tuple[int, ...], str]] = {}
 
     def get(self, url: str) -> dict[str, object] | None:
         entry = self.index.get(cache_key(url))
         if not entry:
             return None
         path = self.entry_path(entry)
-        if not path.is_file():
+        try:
+            stat = path.stat()
+            signature = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            checked = self._verified.get(path)
+            digest = checked[1] if checked and checked[0] == signature else file_digest(path)
+        except FileNotFoundError:
+            return None
+        self._verified[path] = (signature, digest)
+        if digest != entry.get("sha256"):
             return None
         return entry
 
     def get_validated(self, url: str, metadata: FileMetadata | None) -> dict[str, object] | None:
+        if metadata is None:
+            return None
         entry = self.get(url)
         if not entry:
             return None
-        if metadata is None or cache_entry_matches(entry, metadata):
+        if cache_entry_matches(entry, metadata):
             return entry
         return None
 
@@ -47,8 +58,10 @@ class FileCache:
         suffix = suffix if suffix.startswith(".") else ""
         cache_path = self.files_dir / f"{digest[:2]}" / f"{digest}{suffix}"
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        if not cache_path.exists():
-            cache_path.write_bytes(body)
+        if not cache_path.exists() or file_digest(cache_path) != digest:
+            temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
+            temporary.write_bytes(body)
+            temporary.replace(cache_path)
 
         self.index[cache_key(url)] = {
             "path": str(cache_path.relative_to(self.root)),
@@ -125,11 +138,6 @@ def cache_entry_matches(entry: dict[str, object], metadata: FileMetadata) -> boo
             and entry_length == metadata.content_length
         )
 
-    if entry_length is not None and metadata.content_length is not None:
-        entry_type = str(entry.get("content_type") or "").split(";", 1)[0]
-        metadata_type = metadata.content_type.split(";", 1)[0]
-        return entry_length == metadata.content_length and entry_type == metadata_type
-
     return False
 
 
@@ -160,3 +168,10 @@ def unique_path_for_cache(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise RuntimeError(f"cannot allocate unique filename for {path}")
+
+
+def file_digest(path: Path) -> str:
+    import hashlib
+
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()

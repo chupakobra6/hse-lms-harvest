@@ -28,17 +28,6 @@ def test_cache_entry_matches_by_etag() -> None:
     assert not cache_entry_matches(entry, FileMetadata(etag='"changed"', content_length=100))
 
 
-def test_cache_entry_matches_by_length_and_content_type_when_no_etag() -> None:
-    entry = {"content_length": 0, "content_type": "application/pdf; charset=binary"}
-
-    assert cache_entry_matches(
-        entry, FileMetadata(content_length=0, content_type="application/pdf")
-    )
-    assert not cache_entry_matches(
-        entry, FileMetadata(content_length=1, content_type="application/pdf")
-    )
-
-
 def test_file_cache_store_validate_and_materialize(tmp_path) -> None:
     cache = FileCache(tmp_path / "cache")
     source_url = "https://edu.hse.ru/pluginfile.php/1/report.pdf"

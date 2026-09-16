@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 
 from hse_lms_harvest.cli import run_migrate
 from hse_lms_harvest.manifest import (
@@ -6,7 +7,9 @@ from hse_lms_harvest.manifest import (
     metadata_matches,
     page_content_fingerprint,
     page_from_data,
+    pages_from_manifest,
 )
+from hse_lms_harvest.model import PageCapture
 
 
 def test_page_from_data_tolerates_old_manifest_without_new_fields() -> None:
@@ -145,3 +148,18 @@ def test_migrate_regenerates_dump_files_from_existing_manifest(tmp_path) -> None
     assert migrated["pages"][0]["content_fingerprint"]
     assert (dump / "pages" / "0001-course.md").is_file()
     assert (dump / "navigation.md").is_file()
+
+
+def test_current_capture_roundtrip_preserves_content_and_integrity():
+    page = PageCapture(
+        1,
+        "https://example/course",
+        "https://example/course",
+        "Title",
+        "Title",
+        ["Required:", "Value -"],
+    )
+    page.content_fingerprint = page_content_fingerprint(page)
+    restored = pages_from_manifest({"format_version": FORMAT_VERSION, "pages": [asdict(page)]})[0]
+    assert restored.text_lines == page.text_lines
+    assert page_content_fingerprint(restored) == page.content_fingerprint

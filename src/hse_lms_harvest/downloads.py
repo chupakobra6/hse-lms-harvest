@@ -161,7 +161,7 @@ async def download_one_file(
             download_media=download_media,
             max_file_bytes=max_file_bytes,
         )
-        if skip_reason:
+        if skip_reason and not (link.kind == "file" and skip_reason.startswith("SKIP html:")):
             logger.log(skip_reason.lower())
             return skip_reason
 
@@ -184,7 +184,28 @@ async def download_one_file(
                 else:
                     logger.log(f"cache metadata incomplete; refreshing {safe_url(link.url)}")
 
-        response = await context.request.get(link.url, timeout=max(1, file_download_timeout_ms))
+        cached = file_cache.get(link.url) if file_cache is not None else None
+        conditional_headers = {}
+        if cached and not cache_entry_can_name_target(cached, target, file_cache):
+            cached = None
+        if cached:
+            if cached.get("etag"):
+                conditional_headers["If-None-Match"] = str(cached["etag"])
+            elif cached.get("last_modified"):
+                conditional_headers["If-Modified-Since"] = str(cached["last_modified"])
+        response = await context.request.get(
+            link.url, timeout=max(1, file_download_timeout_ms), headers=conditional_headers
+        )
+        if response.status == 304 and cached and conditional_headers:
+            target = target_with_metadata_extension(target, metadata_from_cache_entry(cached))
+            materialized = file_cache.materialize(cached, target)
+            if materialized is not None:
+                return (
+                    f"CACHED {materialized.relative_to(files_dir.parent)} "
+                    f"sha256:{str(cached['sha256'])[:12]} source:{safe_url(link.url)}"
+                )
+            # The local blob vanished after validation: acquire its body without a condition.
+            response = await context.request.get(link.url, timeout=max(1, file_download_timeout_ms))
         if not response.ok:
             message = f"Download returned HTTP {response.status}"
             logger.log(f"{message}: {safe_url(link.url)}")
@@ -204,6 +225,14 @@ async def download_one_file(
             max_file_bytes=max_file_bytes,
         )
         if skip_reason:
+            if link.kind == "file" and skip_reason.startswith("SKIP html:"):
+                await diagnostics.error(
+                    "file_download_html",
+                    "Expected attachment returned HTML instead of a file",
+                    url=link.url,
+                    details={"label": link.text},
+                )
+                return f"ERROR attachment returned HTML: {safe_url(link.url)}"
             logger.log(skip_reason.lower())
             return skip_reason
 

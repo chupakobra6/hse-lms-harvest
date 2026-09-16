@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from collections import deque
 from contextlib import suppress
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ from .capture import capture_has_network_disconnect, capture_page, should_queue_
 from .cleanup import run_cleanup
 from .cli_args import build_parser
 from .course import resolve_course_url
+from .coverage import coverage_scope, make_coverage
 from .credentials import (
     CredentialError,
     credentials_status,
@@ -42,9 +45,10 @@ from .manifest import (
     manifest_paths,
     render_dump,
     render_dump_from_manifest,
+    write_manifest,
 )
 from .model import PageCapture
-from .page_cache import load_page_reuse_index, mark_reused_downloads, maybe_reuse_page
+from .page_cache import load_page_reuse_index, maybe_reuse_page
 from .privacy import redact_url, strip_fragment
 from .text import stable_slug
 
@@ -57,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "login":
             asyncio.run(run_login(args))
         elif args.command == "harvest":
-            asyncio.run(run_harvest(args))
+            return asyncio.run(run_harvest(args))
         elif args.command == "credentials":
             run_credentials(args)
         elif args.command == "cleanup":
@@ -197,10 +201,16 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
     return any(path in lower_url for path in ("/my/", "/course/view.php", "/mod/"))
 
 
-async def run_harvest(args: argparse.Namespace) -> None:
+async def run_harvest(args: argparse.Namespace) -> int:
+    if args.max_pages < 1:
+        raise RuntimeError("--max-pages must be positive")
+    if args.resume_dump and (args.resume_latest or args.reuse_dump):
+        raise RuntimeError("--resume-dump cannot be combined with --resume-latest/--reuse-dump")
+    if (args.resume_dump or args.resume_latest) and args.page_cache == "off":
+        raise RuntimeError("resume requires --page-cache validate")
     profile = Path(args.profile).expanduser().resolve()
     out_root = Path(args.out).expanduser().resolve()
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     dump_name = f"{stable_slug(urlparse(args.url).netloc)}-{stamp}"
     out_dir = out_root / dump_name
     files_dir = out_dir / "files"
@@ -243,6 +253,48 @@ async def run_harvest(args: argparse.Namespace) -> None:
     file_cache = None if args.no_file_cache else FileCache(Path(args.file_cache_dir))
     page_reuse = load_page_reuse_index(args, out_root, out_dir, logger)
     reused_page_count = 0
+    resumed_from = ""
+    pending: list[str] = []
+    stop_reason = ""
+    manifest: dict[str, Any] = {}
+
+    def checkpoint(*, reason: str = "interrupted", render: bool = False) -> None:
+        manifest.update(
+            {
+                "format_version": FORMAT_VERSION,
+                "source_url": redact_url(resolved_start_url),
+                "requested_url": redact_url(args.url),
+                "course_title": args.course_title,
+                "captured_at": datetime.now().isoformat(timespec="seconds"),
+                "profile_dir": str(profile),
+                "errors": errors,
+                "coverage": make_coverage(
+                    args,
+                    resolved_start_url,
+                    pages,
+                    [*pending, *queue],
+                    stop_reason=reason,
+                ),
+                "resumed_from": resumed_from,
+                "page_cache": {
+                    "mode": args.page_cache,
+                    "source": str(page_reuse.manifest_path) if page_reuse else "",
+                    "reused_pages": reused_page_count,
+                },
+                "debug": {
+                    "error_count": len(diagnostics.errors),
+                    "events": "debug/events.jsonl",
+                    "errors": "debug/errors.json",
+                    "errors_markdown": "debug/errors.md",
+                },
+                "page_count": len(pages),
+                "pages": [asdict(capture) for capture in pages],
+            }
+        )
+        if render:
+            render_dump(out_dir, manifest, pages)
+        else:
+            write_manifest(out_dir / "manifest.json", manifest)
 
     async with async_playwright() as playwright:
         try:
@@ -269,38 +321,94 @@ async def run_harvest(args: argparse.Namespace) -> None:
         resolved_start_url = await resolve_course_url(
             page, args.url, args.course_title, debug_dir, logger, screenshots, diagnostics
         )
+        resume_confirmed: set[str] = set()
+        resume_order: dict[str, int] = {}
+        if args.resume_dump or args.resume_latest:
+            compatible = (
+                page_reuse is not None
+                and page_reuse.coverage.get("version") == 1
+                and page_reuse.coverage.get("status") == "partial"
+                and page_reuse.coverage.get("scope") == coverage_scope(args, resolved_start_url)
+            )
+            if args.resume_dump and not compatible:
+                await close_context(context, logger, diagnostics)
+                raise RuntimeError("resume requires a partial dump with the same capture scope")
+            if compatible:
+                resume_confirmed = set(page_reuse.coverage.get("confirmed_urls") or [])
+                resumed_from = str(page_reuse.manifest_path)
+                resume_order = {
+                    url: index
+                    for index, url in enumerate(page_reuse.coverage.get("remaining_urls") or [])
+                }
         live_refresh_urls = (
             {strip_fragment(resolved_start_url)} if args.refresh_start_page else set()
         )
         queue.append(resolved_start_url)
         queued.add(strip_fragment(resolved_start_url))
-
-        while queue and len(pages) < args.max_pages:
-            url = queue.popleft()
-            url_key = strip_fragment(url)
-            if url_key in visited:
-                continue
-            visited.add(url_key)
-            index = len(pages) + 1
-
-            capture = None
-            if url_key in live_refresh_urls:
-                logger.log(f"[{index}/{args.max_pages}] refresh start page {safe_url(url)}")
-            else:
-                capture = await maybe_reuse_page(
-                    context,
-                    url,
-                    index,
-                    args,
-                    page_reuse,
-                    out_dir,
-                    logger,
-                    diagnostics,
-                )
-            if capture is not None:
-                reused_page_count += 1
-                mark_reused_downloads(capture, downloaded_urls)
+        new_page_count = 0
+        checkpoint()
+        try:
+            while queue:
+                if resume_order:
+                    # Validate known pages first, then advance the saved unfinished frontier;
+                    # a failing early link must not consume every future batch.
+                    queue = deque(
+                        sorted(
+                            queue,
+                            key=lambda url: (
+                                0 if strip_fragment(url) in resume_confirmed else 1,
+                                resume_order.get(strip_fragment(url), len(resume_order)),
+                            ),
+                        )
+                    )
+                url = queue.popleft()
+                url_key = strip_fragment(url)
+                if url_key in visited:
+                    continue
+                if url_key not in resume_confirmed and new_page_count >= args.max_pages:
+                    pending.append(url_key)
+                    continue
+                if url_key not in resume_confirmed:
+                    new_page_count += 1
+                visited.add(url_key)
+                index = len(pages) + 1
+                # Persist the in-flight URL until the page and its discovered links are saved.
+                pending.append(url_key)
+                checkpoint()
+                capture = None
+                if url_key not in live_refresh_urls:
+                    capture = await maybe_reuse_page(
+                        context,
+                        url,
+                        index,
+                        args,
+                        page_reuse,
+                        out_dir,
+                        logger,
+                        diagnostics,
+                        file_cache=file_cache,
+                        downloaded_urls=downloaded_urls,
+                    )
+                if capture is not None:
+                    reused_page_count += 1
+                else:
+                    logger.log(f"[{index}] capture {safe_url(url)}")
+                    capture = await capture_page(
+                        context,
+                        page,
+                        url,
+                        index,
+                        args,
+                        files_dir,
+                        debug_dir,
+                        logger,
+                        downloaded_urls,
+                        screenshots,
+                        file_cache,
+                        diagnostics,
+                    )
                 pages.append(capture)
+                pending.remove(url_key)
                 for link in capture.links:
                     link_key = strip_fragment(link.url)
                     if link_key == strip_fragment(capture.final_url):
@@ -310,77 +418,46 @@ async def run_harvest(args: argparse.Namespace) -> None:
                     if should_queue_link(link, resolved_start_url, args):
                         queue.append(link.url)
                         queued.add(link_key)
-                continue
-
-            logger.log(f"[{index}/{args.max_pages}] capture {safe_url(url)}")
-
-            capture = await capture_page(
-                context,
-                page,
-                url,
-                index,
-                args,
-                files_dir,
-                debug_dir,
-                logger,
-                downloaded_urls,
-                screenshots,
-                file_cache,
-                diagnostics,
+                checkpoint()
+                if capture_has_network_disconnect(capture):
+                    stop_reason = "capture_error"
+                    diagnostics.warning(
+                        "network_disconnected_abort",
+                        "Network disconnected; partial dump saved",
+                        page_index=index,
+                        url=url,
+                    )
+                    break
+        except (Exception, asyncio.CancelledError) as exc:
+            stop_reason = "interrupted"
+            errors.append(safe_error(exc) or type(exc).__name__)
+            await diagnostics.error(
+                "harvest_interrupted",
+                "Harvest interrupted; checkpoint preserved",
+                exc=exc,
             )
-            pages.append(capture)
-            if capture_has_network_disconnect(capture):
-                message = f"network disconnected while capturing {safe_url(url)}"
-                errors.append(message)
-                logger.log(f"{message}; aborting current subject")
-                diagnostics.warning(
-                    "network_disconnected_abort",
-                    "Network disconnected; aborting current subject to avoid noisy partial dump",
-                    page_index=index,
-                    url=url,
-                )
-                break
-
-            for link in capture.links:
-                link_key = strip_fragment(link.url)
-                if link_key == strip_fragment(capture.final_url):
-                    continue
-                if link_key in visited or link_key in queued:
-                    continue
-                if should_queue_link(link, resolved_start_url, args):
-                    queue.append(link.url)
-                    queued.add(link_key)
+            checkpoint(reason=stop_reason, render=True)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
 
         await close_context(context, logger, diagnostics)
 
-    manifest = {
-        "format_version": FORMAT_VERSION,
-        "source_url": redact_url(resolved_start_url),
-        "requested_url": redact_url(args.url),
-        "course_title": args.course_title,
-        "captured_at": datetime.now().isoformat(timespec="seconds"),
-        "profile_dir": str(profile),
-        "errors": errors,
-        "page_cache": {
-            "mode": args.page_cache,
-            "source": str(page_reuse.manifest_path) if page_reuse is not None else "",
-            "reused_pages": reused_page_count,
-        },
-        "debug": {
-            "error_count": len(diagnostics.errors),
-            "events": "debug/events.jsonl",
-            "errors": "debug/errors.json",
-            "errors_markdown": "debug/errors.md",
-        },
-    }
-    render_dump(out_dir, manifest, pages)
-
+    checkpoint(reason=stop_reason, render=True)
     logger.log(f"saved LMS dump: {out_dir}")
     logger.log(f"summary: {out_dir / 'summary.md'}")
     logger.log(f"navigation: {out_dir / 'navigation.md'}")
     logger.log(f"manifest: {out_dir / 'manifest.json'}")
-    if errors:
-        raise RuntimeError("; ".join(errors))
+    print(
+        "HARVEST_RESULT "
+        + json.dumps(
+            {
+                "manifest_path": str(out_dir / "manifest.json"),
+                "coverage_status": manifest["coverage"]["status"],
+                "coverage_version": 1,
+            }
+        )
+    )
+    return 0 if manifest["coverage"]["status"] == "complete" else 1
 
 
 async def close_context(

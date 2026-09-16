@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from playwright.async_api import BrowserContext
 from playwright.async_api import Error as PlaywrightError
 
+from .coverage import capture_contract
 from .debug import DiagnosticRecorder, RunLogger, safe_url
-from .downloads import concise_error
+from .downloads import concise_error, download_files
+from .file_cache import FileCache
 from .manifest import (
     clone_page_for_reuse,
-    copy_reused_files,
     latest_manifest_path,
     load_manifest,
     metadata_has_validators,
     metadata_matches,
+    page_content_fingerprint,
     pages_from_manifest,
     response_metadata,
 )
@@ -28,6 +30,7 @@ class PageReuseIndex:
     manifest_path: Path
     dump_dir: Path
     pages_by_url: dict[str, PageCapture]
+    coverage: dict = field(default_factory=dict)
 
     def get(self, url: str) -> PageCapture | None:
         return self.pages_by_url.get(strip_fragment(url))
@@ -44,8 +47,10 @@ def load_page_reuse_index(
         return None
 
     manifest_path: Path | None
-    if args.reuse_dump:
-        reuse_target = Path(args.reuse_dump).expanduser().resolve()
+    if getattr(args, "resume_dump", None) or args.reuse_dump:
+        reuse_target = (
+            Path(getattr(args, "resume_dump", None) or args.reuse_dump).expanduser().resolve()
+        )
         manifest_path = (
             reuse_target if reuse_target.name == "manifest.json" else reuse_target / "manifest.json"
         )
@@ -59,7 +64,8 @@ def load_page_reuse_index(
         return None
 
     pages_by_url: dict[str, PageCapture] = {}
-    for page in pages_from_manifest(load_manifest(manifest_path)):
+    manifest = load_manifest(manifest_path)
+    for page in pages_from_manifest(manifest):
         for url in (page.url, page.final_url):
             key = strip_fragment(url)
             if key:
@@ -74,6 +80,7 @@ def load_page_reuse_index(
         manifest_path=manifest_path,
         dump_dir=manifest_path.parent,
         pages_by_url=pages_by_url,
+        coverage=manifest.get("coverage") or {},
     )
 
 
@@ -86,12 +93,20 @@ async def maybe_reuse_page(
     out_dir: Path,
     logger: RunLogger,
     diagnostics: DiagnosticRecorder,
+    *,
+    file_cache: FileCache | None = None,
+    downloaded_urls: set[str] | None = None,
 ) -> PageCapture | None:
     if reuse is None:
         return None
 
     previous = reuse.get(url)
-    if previous is None:
+    if (
+        previous is None
+        or previous.errors
+        or previous.capture_contract != capture_contract(args)
+        or previous.content_fingerprint != page_content_fingerprint(previous)
+    ):
         return None
 
     if args.page_cache == "validate":
@@ -114,7 +129,27 @@ async def maybe_reuse_page(
             return None
 
     page = clone_page_for_reuse(previous, index=index, reused_from=reuse.dump_dir)
-    copy_reused_files(page, reuse.dump_dir, out_dir)
+    # HTML validity says nothing about attachment contents. Revalidate files through
+    # their own cache; missing blobs are downloaded without repeating browser capture.
+    page.downloaded_files = []
+    if args.download_files:
+        page.downloaded_files = await download_files(
+            context,
+            out_dir / "files",
+            page.links,
+            args.url,
+            logger,
+            downloaded_urls if downloaded_urls is not None else set(),
+            args.download_media,
+            args.skip_lms_file_server,
+            args.max_file_mb,
+            args.download_concurrency,
+            args.file_head_timeout_ms,
+            args.file_download_timeout_ms,
+            args.trust_file_cache,
+            file_cache,
+            diagnostics,
+        )
     logger.log(f"[{index}/{args.max_pages}] reused page cache {safe_url(url)}")
     diagnostics.event(
         "info",
@@ -175,12 +210,3 @@ async def fetch_page_head_metadata(
         return None
     metadata = response_metadata(response.headers)
     return metadata if metadata_has_validators(metadata) else None
-
-
-def mark_reused_downloads(page: PageCapture, downloaded_urls: set[str]) -> None:
-    for item in page.downloaded_files:
-        if " source:" not in item:
-            continue
-        source = item.split(" source:", 1)[1].strip()
-        if source:
-            downloaded_urls.add(strip_fragment(source))

@@ -45,7 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     harvest.add_argument(
         "--out", default=str(DEFAULT_DUMPS_DIR), help="Output directory for dumps."
     )
-    harvest.add_argument("--max-pages", type=int, default=80, help="Maximum LMS pages to visit.")
+    harvest.add_argument(
+        "--max-pages",
+        type=int,
+        default=80,
+        help="Maximum new/unconfirmed pages per run; resume revalidates confirmed pages separately.",
+    )
     harvest.add_argument(
         "--network-idle-timeout-ms",
         type=int,
@@ -76,6 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
     harvest.add_argument(
         "--reuse-dump",
         help="Specific previous dump directory or manifest.json to use for page-cache reuse.",
+    )
+    harvest.add_argument(
+        "--resume-latest",
+        action="store_true",
+        help="Resume the latest partial dump if its scope matches; otherwise start a new crawl.",
+    )
+    harvest.add_argument(
+        "--resume-dump",
+        help="Continue a partial dump with matching scope, revalidating its confirmed pages.",
     )
     harvest.add_argument(
         "--refresh-start-page",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from dataclasses import asdict, replace
 from datetime import datetime
 from hashlib import sha256
@@ -13,14 +12,13 @@ from .classify import is_ignored_capture_url
 from .model import Button, Link, PageCapture
 from .render import (
     common_link_keys,
-    compact_downloaded_files,
     write_navigation,
     write_page_files,
     write_summary,
 )
 from .text import common_lines
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 PAGE_METADATA_KEYS = ("etag", "last-modified", "content-length", "content-type")
 MARKDOWN_LINK_TARGET_RE = re.compile(r"\[(?P<label>[^\]\n]*)\]\((?P<url>[^)\n]*)\)")
 
@@ -55,22 +53,34 @@ def latest_manifest_path(root: Path, *, exclude: Path | None = None) -> Path | N
 
 def pages_from_manifest(manifest: dict[str, Any]) -> list[PageCapture]:
     pages = manifest.get("pages") or []
-    return [page_from_data(item) for item in pages if isinstance(item, dict)]
+    return [
+        page_from_data(item, filter_legacy=manifest.get("format_version") != FORMAT_VERSION)
+        for item in pages
+        if isinstance(item, dict)
+    ]
 
 
-def page_from_data(data: dict[str, Any]) -> PageCapture:
+def page_from_data(data: dict[str, Any], *, filter_legacy: bool = True) -> PageCapture:
     return PageCapture(
         index=int(data.get("index") or 0),
         url=str(data.get("url") or ""),
         final_url=str(data.get("final_url") or data.get("url") or ""),
         title=str(data.get("title") or ""),
         heading=str(data.get("heading") or ""),
-        text_lines=prune_ignored_text_lines(data.get("text_lines") or []),
-        unique_text_lines=prune_ignored_text_lines(data.get("unique_text_lines") or []),
+        text_lines=(
+            prune_ignored_text_lines(data.get("text_lines") or [])
+            if filter_legacy
+            else list(data.get("text_lines") or [])
+        ),
+        unique_text_lines=(
+            prune_ignored_text_lines(data.get("unique_text_lines") or [])
+            if filter_legacy
+            else list(data.get("unique_text_lines") or [])
+        ),
         links=[
             link_from_data(item)
             for item in data.get("links") or []
-            if isinstance(item, dict) and not should_prune_link_data(item)
+            if isinstance(item, dict) and (not filter_legacy or not should_prune_link_data(item))
         ],
         buttons=[
             button_from_data(item) for item in data.get("buttons") or [] if isinstance(item, dict)
@@ -78,9 +88,10 @@ def page_from_data(data: dict[str, Any]) -> PageCapture:
         downloaded_files=[
             str(item)
             for item in data.get("downloaded_files") or []
-            if not should_prune_downloaded_file(str(item))
+            if not filter_legacy or not should_prune_downloaded_file(str(item))
         ],
         errors=[str(item) for item in data.get("errors") or []],
+        capture_contract=dict(data.get("capture_contract") or {}),
         source_metadata={
             str(key): str(value)
             for key, value in (data.get("source_metadata") or {}).items()
@@ -185,19 +196,6 @@ def clone_page_for_reuse(page: PageCapture, *, index: int, reused_from: Path) ->
     )
 
 
-def copy_reused_files(page: PageCapture, previous_dump: Path, current_dump: Path) -> None:
-    for item in compact_downloaded_files(page.downloaded_files):
-        source = previous_dump / item
-        target = current_dump / item
-        if not source.is_file() or target.exists():
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            target.hardlink_to(source)
-        except OSError:
-            shutil.copy2(source, target)
-
-
 def render_dump_from_manifest(manifest_path: Path) -> None:
     manifest = load_manifest(manifest_path)
     dump_dir = manifest_path.parent
@@ -240,4 +238,6 @@ def render_dump(
 
 def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
