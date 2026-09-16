@@ -1,7 +1,7 @@
 <h1 align="center">hse-lms-harvest</h1>
 
 <p align="center">
-  Read-only Smart LMS course page and attachment harvester for local study automation.
+  Сбор страниц и учебных вложений Smart LMS для локальной автоматизации учёбы.
 </p>
 
 <p align="center">
@@ -12,32 +12,33 @@
 </p>
 
 <p align="center">
-  <a href="#why">Why</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#capture-output">Capture output</a> ·
-  <a href="#safety">Safety</a> ·
-  <a href="#repository-map">Repository map</a>
+  <a href="#why">Назначение</a> ·
+  <a href="#quick-start">Быстрый запуск</a> ·
+  <a href="#capture-output">Результат</a> ·
+  <a href="#safety">Безопасность</a> ·
+  <a href="#repository-map">Устройство проекта</a>
 </p>
 
-## Why
+<a id="why"></a>
 
-`hse-lms-harvest` opens Smart LMS pages through a local browser profile and turns course pages into
-agent-friendly files: compact Markdown navigation, full JSON page captures, downloaded study
-attachments, and structured diagnostics.
+## Назначение
 
-The default workflow is conservative. It reads visible course content, opens read-only assignment
-detail pages when they contain task text, and avoids form submission or course-state mutation.
+`hse-lms-harvest` открывает Smart LMS через локальный браузерный профиль и сохраняет учебный контекст: компактный Markdown для агента, полную структуру страниц в JSON, вложения и диагностику.
 
-| Capability | What it gives |
+По умолчанию сборщик читает видимое содержимое и раскрывает страницы с условиями заданий, включая «Добавить ответ на задание». Формы не отправляются, состояние курса не меняется.
+
+| Возможность | Результат |
 | --- | --- |
-| Browser-backed capture | Uses the same authenticated pages a student can already access. |
-| Compact Markdown layer | `navigation.md`, `summary.md`, and `pages/*.md` are optimized for fast agent reads. |
-| Full JSON layer | `manifest.json` and `pages/*.json` keep complete links, buttons, file metadata, and errors. |
-| Attachment handling | Same-site study files, including Moodle `pluginfile.php`, can be downloaded with caching. |
-| Privacy filters | Personal submission files, grades, messages, calendars, and report/detail noise are excluded. |
-| Local diagnostics | Errors are written as structured bundles without saving full HTML by default. |
+| Сбор через браузер | Использует страницы, доступные пользователю после входа. |
+| Компактное представление | `navigation.md`, `summary.md` и `pages/*.md` экономят контекст агента. |
+| Полная структура | `manifest.json` и `pages/*.json` сохраняют ссылки, кнопки, сведения о файлах и ошибки после фильтрации при сборе. |
+| Учебные вложения | Скачивает файлы с того же сайта, включая обычные Moodle URL `pluginfile.php`, с повторным использованием кэша. |
+| Фильтрация | Исключает личные отправленные работы, разделы оценок, сообщений, календаря и вторичные отчётные страницы. |
+| Диагностика | Сохраняет структурированные сведения об ошибках; полный HTML по умолчанию не записывается. |
 
-## Quick Start
+<a id="quick-start"></a>
+
+## Быстрый запуск
 
 ```bash
 cd hse-lms-harvest
@@ -45,8 +46,7 @@ uv sync --extra dev
 make check
 ```
 
-Store the password through an installed credential helper. The command prompts without echo;
-`.env` contains only the username, helper path and service name:
+Сначала настройте установленный внешний помощник хранения пароля. Команда запрашивает пароль без отображения; в `.env` сохраняются только имя пользователя, путь помощника и имя сервиса:
 
 ```bash
 uv run hse-lms-harvest credentials set \
@@ -55,24 +55,15 @@ uv run hse-lms-harvest credentials set \
   --env-file ".env"
 ```
 
-The helper is an external executable; its absolute path is required at setup and saved as
-`HSE_LMS_CREDENTIAL_HELPER`. It must exchange one JSON request/response through stdin/stdout:
-requests use `operation` (`get`, `put`, `check`, `delete`), `account`, and `service`
-(`codex-study-lms`); `put` also receives `secret`. A successful `get` returns `secret`, other
-successful operations return `{}`. Errors use an `error` code: `not-found`, `locked`,
-`interaction-required`, `access-denied`, or `user-canceled`. The helper must disable interactive approval by default; calls
-time out after 10 seconds. Passwords never enter helper arguments, inherited secret environment
-variables or diagnostics. `credentials set --password-stdin` supports provisioning from a process
-that supplies the password on stdin.
+Помощник — отдельный исполняемый файл. Его абсолютный путь обязателен при настройке и сохраняется как `HSE_LMS_CREDENTIAL_HELPER`. Один вызов обменивается одним JSON-запросом и ответом через stdin/stdout:
 
-`credentials status --env-file .env` checks availability without requesting the password;
-`credentials delete --env-file .env` removes the stored secret and its local configuration.
-`HSE_LMS_PASSWORD` is no longer read from `.env` or the environment. To migrate, run
-`credentials set` with the existing password: the old `.env` entry is removed after helper
-write/readback succeeds. Headless auto-login reports unavailable credentials or failed login
-without falling into a manual-login wait.
+- Запрос содержит `operation` (`get`, `put`, `check`, `delete`), `account` и `service` (`codex-study-lms`); для `put` также передаётся `secret`.
+- Успешный `get` возвращает `secret`, остальные успешные операции — `{}`. Ошибка содержит поле `error`: `not-found`, `locked`, `interaction-required`, `access-denied` или `user-canceled`.
+- Помощник работает без интерактивных подтверждений; таймаут вызова — 10 секунд. Пароль не передаётся в аргументах, переменных окружения или диагностике. Для настройки из другого процесса есть `credentials set --password-stdin`.
 
-Run a course capture:
+`credentials status --env-file .env` проверяет доступность через `check`, не запрашивая пароль. `credentials delete --env-file .env` удаляет секрет и локальную конфигурацию. `HSE_LMS_PASSWORD` не читается ни из `.env`, ни из окружения. При переходе на помощник выполните `credentials set` с существующим паролем: прежняя запись удаляется после успешного сохранения и обратного чтения. Фоновый вход сообщает о недоступном секрете или ошибке авторизации и не ждёт ручного ввода.
+
+Сбор курса:
 
 ```bash
 uv run hse-lms-harvest harvest \
@@ -87,44 +78,61 @@ uv run hse-lms-harvest harvest \
   --headless
 ```
 
-For command discovery:
+Список команд:
 
 ```bash
 make help
 uv run hse-lms-harvest --help
 ```
 
-## Capture Output
+<a id="capture-output"></a>
 
-A run writes a new `dumps/<host>-YYYYMMDD-HHMMSS/` directory:
+## Результат сбора
 
-| Path | Purpose |
+Каждый запуск создаёт `dumps/<host>-YYYYMMDD-HHMMSS/`:
+
+| Путь | Назначение |
 | --- | --- |
-| `manifest.json` | Machine-readable source of truth after capture-level filters. |
-| `navigation.md` | First file to give an agent: page tree plus local Markdown/JSON/file pointers. |
-| `navigation.json` | Machine-readable navigation without LMS URLs. |
-| `summary.md` | Short human/agent summary without internal indexes. |
-| `pages/*.md` | Compact page text without repeated navigation lines, service URLs, hashes, or action URLs. |
-| `pages/*.json` | Full page structure: text, links, buttons, downloaded file records, and errors. |
-| `files/` | Downloaded attachments when `--download-files` is enabled. |
-| `debug/errors.md` | Short error index with pointers to structured diagnostic bundles. |
+| `manifest.json` | Машинный источник данных после фильтрации при сборе. |
+| `navigation.md` | Вход для агента: дерево страниц и локальные ссылки на Markdown, JSON и файлы. |
+| `navigation.json` | Машинная навигация без URL LMS. |
+| `summary.md` | Краткая сводка без внутренних индексов. |
+| `pages/*.md` | Текст без повторов навигации, служебных URL, хешей и адресов действий. |
+| `pages/*.json` | Полная структура страницы: текст, ссылки, кнопки, скачанные файлы и ошибки. |
+| `files/` | Вложения, скачанные с `--download-files`. |
+| `debug/errors.md` | Краткий индекс ошибок со ссылками на подробную диагностику. |
 
-If only the output format changed, reuse an existing dump instead of hitting LMS again:
+В Markdown текст гиперссылки сохраняется как обычный текст; полный URL находится в JSON. Для отладки сначала читайте `debug/errors.md`; подробности — в `debug/errors.json`, `debug/errors/<id>/` и `debug/events.jsonl`. Эти приватные материалы не входят в основной контекст агента. `--debug-dump-mode on-error` включён по умолчанию; `verbose` дополнительно сохраняет HTML, `off` отключает пакеты диагностики. Скриншоты отдельно отключаются через `--screenshot-mode off`.
+
+`--max-pages` ограничивает число страниц за запуск. Сейчас manifest не содержит отдельного признака полного обхода: наличие файлов и успешное завершение команды сами по себе не подтверждают, что очередь исчерпана. Ошибки страниц и скачивания также нужно учитывать при оценке полноты.
+
+Если изменилось только оформление, пересоберите представление из существующего дампа без обращения к LMS:
 
 ```bash
 uv run hse-lms-harvest migrate --out dumps/current-subjects
 ```
 
-## Safety
+## Нагрузка и повторное использование
 
-- `.env`, `.browser-profile/`, `dumps/`, browser cookies, screenshots, and logs are ignored by git.
-- The harvester does not click `Save`, `Submit`, `Delete`, or similar state-changing controls.
-- `--allow-state-changes` only permits explicit completion toggles; save/submit/delete stays blocked.
-- Audio/video and conference artifacts are skipped by default; use `--download-media` only when you intentionally need them.
-- Personal submission files under `assignsubmission_file/submission_files` are not downloaded and are removed from compact capture text.
-- Tests use local fixtures and `about:blank`; they do not call a live LMS.
+- `--download-files` включает учебные вложения с того же сайта. `--skip-lms-file-server` явно отключает скачивание `pluginfile.php` и `/webservice/pluginfile.php`, сохраняя ссылки.
+- Перед скачиванием выполняется короткий `HEAD` для проверки типа и размера; `--file-head-timeout-ms 0` отключает его. Лимит задаётся через `--max-file-mb`, параллельность — через `--download-concurrency`.
+- Файловый кэш включён в `dumps/_file-cache`; `--no-file-cache` отключает его. `--trust-file-cache` явно разрешает доверять уже проверенной локальной копии без сетевой проверки. Ограничение текущей реализации: обычная проверка тоже может использовать старый файл при недоступных метаданных или совпадении только размера и типа. Это не подтверждает неизменность содержимого.
+- Для страниц по умолчанию действует `--page-cache validate`: сравнение HTTP-валидаторов, сначала через `HEAD`, затем при необходимости через запрос метаданных `GET`. `--page-cache trust` разрешает локальное повторное использование с риском пропустить изменения. Совпадение валидатора страницы не проверяет отдельно полноту прежнего захвата и наличие всех его вложений.
+- Изображения, шрифты, аудио и видео страницы блокируются; `--load-page-assets` включает их. Общее ожидание `networkidle` отключено, а корень курса получает короткое ожидание `--course-network-idle-timeout-ms` для лениво загружаемого оглавления.
 
-## Testing
+Очистку сначала можно просмотреть с `cleanup --all --dry-run`. `cleanup --all` удаляет восстанавливаемые тяжёлые артефакты и браузерный кэш; полезные документы сохраняются. Файловый кэш очищается отдельно через явный `cleanup --file-cache`.
+
+<a id="safety"></a>
+
+## Безопасность
+
+- `.env`, `.browser-profile/`, `dumps/`, cookies, скриншоты и логи исключены из Git; их содержимое остаётся приватным.
+- Сборщик не нажимает «Сохранить», «Отправить», «Удалить» и другие кнопки изменения состояния. `--allow-state-changes` разрешает только отметку выполнения, но не отправку, сохранение или удаление.
+- Аудио, видео и артефакты конференций пропускаются; `--download-media` включайте, когда нужен именно медиаархив.
+- Личные ответы из `assignsubmission_file/submission_files` исключены из скачивания, ссылок и текста. `--skip-action-pages` отключает чтение дополнительных страниц условий задания.
+- Тесты используют локальные фикстуры и `about:blank`, без запросов к живой LMS.
+
+## Проверки
 
 ```bash
 make check
@@ -132,18 +140,18 @@ make doctor
 make smoke
 ```
 
-`make smoke` runs against `about:blank` with temporary paths, so it does not require LMS access.
+`make smoke` использует `about:blank` и временные каталоги, поэтому доступ к LMS не требуется. Проверки по типу изменения описаны в [AGENTS.md](AGENTS.md).
 
-## Repository Map
+<a id="repository-map"></a>
 
-| Path | Purpose |
+## Устройство проекта
+
+| Путь | Назначение |
 | --- | --- |
-| `src/hse_lms_harvest/cli.py` | CLI entrypoint, Playwright orchestration, and page queue. |
-| `src/hse_lms_harvest/cli_args.py` | Command arguments, defaults, and help text. |
-| `src/hse_lms_harvest/capture.py` | Page text, inline links, and read-only action/detail pages. |
-| `src/hse_lms_harvest/classify.py` | URL/file/media classification and unsafe navigation filters. |
-| `src/hse_lms_harvest/downloads.py` | Attachment downloads, HEAD checks, size limits, and file cache. |
-| `src/hse_lms_harvest/manifest.py` | Manifest loading, migration, fingerprints, and page-cache helpers. |
-| `src/hse_lms_harvest/render.py` | `manifest.json`, navigation files, page JSON, and compact Markdown. |
-| `src/hse_lms_harvest/privacy.py` | URL and diagnostic redaction helpers. |
-| `tests/` | Unit tests for public contracts without live LMS calls. |
+| `src/hse_lms_harvest/cli.py`, `cli_args.py` | Команды, параметры, настройки по умолчанию и очередь страниц. |
+| `src/hse_lms_harvest/capture.py`, `classify.py` | Извлечение текста, ссылок, дополнительных условий; классификация и фильтры навигации. |
+| `src/hse_lms_harvest/downloads.py`, `file_cache.py`, `page_cache.py` | Скачивание, ограничения, проверка и повторное использование файлов и страниц. |
+| `src/hse_lms_harvest/manifest.py`, `render.py` | Чтение и миграция manifest, отпечатки содержимого, JSON и Markdown. |
+| `src/hse_lms_harvest/auth.py`, `credentials.py` | Вход и внешний помощник хранения секрета. |
+| `src/hse_lms_harvest/debug.py`, `privacy.py`, `cleanup.py` | Диагностика, скрытие приватных значений и очистка артефактов. |
+| `tests/` | Проверки контрактов без запросов к живой LMS. |

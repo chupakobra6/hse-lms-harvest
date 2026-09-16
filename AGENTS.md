@@ -11,13 +11,12 @@
 - `pluginfile.php` и `/webservice/pluginfile.php` — обычные Moodle file-server URL для учебных вложений. Не считай их вредными и не удаляй поддержку.
 - При `--download-files` учебные same-site вложения скачиваются, включая file-server URL. `--skip-lms-file-server` — только явный opt-out: записать ссылки, но не скачивать эти вложения.
 - Личные отправленные ответы из `assignsubmission_file/submission_files` не скачиваются и не попадают в `links`/capture text: это приватный шум, а не учебные материалы курса для агентного контекста.
-- Оценки, календарь, сообщения и вторичные LMS detail/report links (`mod/glossary/showentry.php`, `mod/quiz/review.php`, `mod/h5pactivity/report.php`) не должны попадать в `links`/capture text и crawl-очередь.
+- Оценки, календарь, сообщения и вторичные LMS detail/report links (`mod/glossary/showentry.php`, `mod/quiz/review.php`, `mod/h5pactivity/report.php`) не должны попадать в `links`/capture text и crawl-очередь: вторичные страницы раздувают историю и проверки, не добавляя нужного учебного контекста.
 - Аудио/видео и Moodle conference artifacts (`chat.txt`, `playback.m3u`, `audio_only*`, `zoom_*`) не скачиваются по умолчанию. Для полного медиа-архива есть `--download-media`.
 - Страницы `Добавить ответ на задание` открываются по умолчанию как read-only action/detail pages, потому что там может появляться текст задания. Отключение только через `--skip-action-pages`.
 - Никогда не нажимай `Сохранить`, `Отправить`, `Удалить`, `Редактировать ответ` и похожие state-changing controls в обычном режиме.
 - `--allow-state-changes` может разрешать только явные completion toggles вроде `Отметить как выполнено`; save/submit/delete всё равно запрещены.
 - Если меняешь правила кликов, очереди ссылок или классификации ссылок, сначала проверь, что прямой сбор курса не уходит в другие курсы, профиль, календарь, сообщения или оценки.
-- Не ставь в crawl-очередь вторичные report/detail pages вроде `mod/glossary/showentry.php`, `mod/quiz/review.php`, `mod/h5pactivity/report.php`: они быстро раздувают историю/тесты и обычно не нужны для учебного контекста.
 - Не делай продакшен-вызовы в тестах. Для тестов используй локальные фикстуры, `about:blank`, временные директории и чистые unit-тесты.
 
 ## Формат дампа
@@ -59,11 +58,12 @@
 ## Карта кода
 - `src/hse_lms_harvest/cli_args.py` — argparse-схема команд, defaults и help text.
 - `src/hse_lms_harvest/cli.py` — CLI entrypoint, команды, Playwright orchestration и очередь страниц.
+- `src/hse_lms_harvest/capture.py`, `downloads.py` — чтение страниц и дополнительных условий, скачивание вложений.
 - `src/hse_lms_harvest/classify.py` — классификация ссылок, файлов, медиа, Moodle artifacts и потенциально опасной навигации.
 - `src/hse_lms_harvest/render.py` — запись `manifest.json`, `navigation.*`, `pages/*.json`, компактного `pages/*.md` и `summary.md`.
 - `src/hse_lms_harvest/manifest.py` — чтение старых manifest, миграция дампов, page fingerprints и page-cache reuse helpers.
-- `src/hse_lms_harvest/page_cache.py` — page-cache index, validation probes and reused page materialization.
-- `src/hse_lms_harvest/file_cache.py` — persistent file cache, metadata, hard link/copy reuse.
+- `src/hse_lms_harvest/page_cache.py` — индекс кэша страниц, проверка метаданных и восстановление файлов страницы.
+- `src/hse_lms_harvest/file_cache.py` — постоянный кэш файлов, метаданные, повторное использование через жёсткую ссылку или копию.
 - `src/hse_lms_harvest/privacy.py` — redaction/safe URL helpers.
 - `src/hse_lms_harvest/debug.py` — `RunLogger`, screenshots, structured diagnostics, error bundles.
 - `src/hse_lms_harvest/text.py` — нормализация текста, slug, подавление повторяющихся строк.
@@ -121,6 +121,7 @@
 - Не переносить приватные дампы в тестовые fixtures и не коммитить результаты аудита.
 
 ## Документация для пользователя
+- [README.md](README.md) описывает текущие ограничения проверки кэша и полноты обхода; учитывай их при оценке результата, пока соответствующее поведение не исправлено.
 - README должен объяснять реальные defaults: read-only сбор, `--download-files`, `--skip-lms-file-server`, file cache, media skip, navigation files, compact Markdown и безопасность форм.
 - Не обещай, что Markdown содержит полные кликабельные ссылки. Полные ссылки находятся в JSON.
 - Не называй `pluginfile.php` подозрительным файлом; это нормальный путь Moodle для учебных вложений.
