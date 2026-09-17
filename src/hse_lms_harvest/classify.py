@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .netology import is_course_page, is_netology_url
+
 FILE_EXTENSIONS = {
     ".7z",
     ".csv",
@@ -136,12 +138,16 @@ def classify_link(text: str, url: str) -> str:
         return "unsafe"
     if "/mod/resource/view.php" in path:
         return "file"
+    if path == "/course/section.php":
+        return "page"
     if ext in FILE_EXTENSIONS:
         return "file"
     if "pluginfile.php" in lower_url or "/webservice/pluginfile.php" in lower_url:
         return "file"
     if "forcedownload=1" in lower_url or "download=1" in lower_url:
         return "file"
+    if is_netology_url(url) and "/lesson_items/" in path:
+        return "page"
     if any(marker in lower_url or marker in lower_text for marker in UNSAFE_NAVIGATION_MARKERS):
         return "unsafe"
     if any(marker in lower_text for marker in STATE_CHANGE_MARKERS):
@@ -152,6 +158,8 @@ def classify_link(text: str, url: str) -> str:
 
 
 def looks_like_course_link(url: str, start_url: str) -> bool:
+    if is_netology_url(start_url):
+        return is_course_page(url, start_url)
     parsed = urlparse(url)
     start = urlparse(start_url)
     if parsed.scheme not in {"http", "https"}:

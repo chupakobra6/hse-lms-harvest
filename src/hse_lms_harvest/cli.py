@@ -48,6 +48,7 @@ from .manifest import (
     write_manifest,
 )
 from .model import PageCapture
+from .netology import course_page_visible, is_netology_url
 from .page_cache import load_page_reuse_index, maybe_reuse_page
 from .privacy import redact_url, strip_fragment
 from .text import stable_slug
@@ -153,6 +154,8 @@ async def wait_for_logged_in(
 
 async def maybe_click_login(page: Page) -> None:
     try:
+        if is_netology_url(page.url):
+            return
         link = page.get_by_role("link", name="Войти")
         if await link.count() == 1:
             await link.click()
@@ -184,6 +187,8 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
         return False
 
     lower_text = f"{title}\n{text}".lower()
+    if is_netology_url(start_url):
+        return await course_page_visible(page)
     logged_in_markers = (
         "мои курсы",
         "вы зашли под именем",
@@ -204,6 +209,10 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
 async def run_harvest(args: argparse.Namespace) -> int:
     if args.max_pages < 1:
         raise RuntimeError("--max-pages must be positive")
+    if args.assignments_only and not is_netology_url(args.url):
+        raise RuntimeError("--assignments-only is supported only for Netology course URLs")
+    if args.open_netology_assignments and not is_netology_url(args.url):
+        raise RuntimeError("--open-netology-assignments is supported only for Netology course URLs")
     if args.resume_dump and (args.resume_latest or args.reuse_dump):
         raise RuntimeError("--resume-dump cannot be combined with --resume-latest/--reuse-dump")
     if (args.resume_dump or args.resume_latest) and args.page_cache == "off":

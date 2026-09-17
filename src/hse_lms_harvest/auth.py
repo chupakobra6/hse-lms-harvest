@@ -6,6 +6,7 @@ from pathlib import Path
 from playwright.async_api import BrowserContext, Page
 from playwright.async_api import Error as PlaywrightError
 
+from .credentials import CredentialError
 from .debug import (
     DiagnosticRecorder,
     RunLogger,
@@ -14,6 +15,7 @@ from .debug import (
     safe_url,
     save_screenshot,
 )
+from .netology import is_netology_url
 
 USERNAME_SELECTORS = (
     'input[type="email"]',
@@ -61,6 +63,8 @@ async def auto_login(
     last_url = ""
     last_recovery_at = 0.0
     submitted = False
+    netology_methods_opened = False
+    netology_email_selected = False
 
     while asyncio.get_running_loop().time() < deadline:
         for page in context.pages:
@@ -73,9 +77,54 @@ async def auto_login(
                 logger.log(f"auto-login inspecting: {safe_url(page.url)}")
                 await save_screenshot(page, debug_dir, "auth-page", logger, screenshots)
 
-            if await fill_login_form(page, username, password, logger, diagnostics):
+            if is_netology_url(start_url) and await netology_captcha_visible(page):
+                await diagnostics.error(
+                    "netology_captcha_required",
+                    "Netology SmartCaptcha requires manual login in the dedicated browser profile",
+                    page=page,
+                    url=start_url,
+                )
+                raise CredentialError(
+                    "Netology requires manual SmartCaptcha; sign in with the dedicated browser profile."
+                )
+            if is_netology_url(start_url) and submitted:
+                continue
+
+            # The Netology modal offers third-party SSO; never send its password there.
+            login_form_ready = not is_netology_url(start_url) or (
+                is_netology_url(page.url)
+                and netology_email_selected
+                and "modal=sign_in" in page.url
+            )
+            if login_form_ready and await fill_login_form(
+                page, username, password, logger, diagnostics
+            ):
                 submitted = True
                 await save_screenshot(page, debug_dir, "auth-submitted", logger, screenshots)
+                continue
+
+            if (
+                is_netology_url(start_url)
+                and "modal=sign_in" in page.url
+                and not netology_methods_opened
+                and await maybe_open_netology_methods(page, logger)
+            ):
+                netology_methods_opened = True
+                await save_screenshot(page, debug_dir, "auth-netology-methods", logger, screenshots)
+                continue
+
+            if (
+                is_netology_url(start_url)
+                and netology_methods_opened
+                and not netology_email_selected
+                and await maybe_choose_netology_email(page, logger)
+            ):
+                netology_email_selected = True
+                await save_screenshot(page, debug_dir, "auth-netology-email", logger, screenshots)
+                continue
+
+            if is_netology_url(start_url) and await maybe_click_netology_login(page, logger):
+                await save_screenshot(page, debug_dir, "auth-netology-opened", logger, screenshots)
                 continue
 
             if await maybe_click_hse_sso_login(page, logger):
@@ -112,6 +161,57 @@ async def auto_login(
             details={"timeout_seconds": timeout_seconds},
         )
     return None
+
+
+async def maybe_click_netology_login(page: Page, logger: RunLogger) -> bool:
+    if not is_netology_url(page.url) or "modal=sign_in" in page.url:
+        return False
+    for selector in ('a[href*="modal=sign_in"]:has-text("Войти")',):
+        locator = page.locator(selector)
+        try:
+            if await locator.count() and await locator.first.is_visible(timeout=500):
+                await locator.first.click(timeout=2_000)
+                logger.log("auto-login opened Netology sign-in")
+                return True
+        except PlaywrightError:
+            continue
+    return False
+
+
+async def maybe_open_netology_methods(page: Page, logger: RunLogger) -> bool:
+    try:
+        choice = page.get_by_text("Другие способы входа", exact=True)
+        if await choice.count() and await choice.first.is_visible(timeout=500):
+            await choice.first.click(timeout=2_000)
+            logger.log("auto-login opened Netology sign-in methods")
+            return True
+    except PlaywrightError:
+        pass
+    return False
+
+
+async def maybe_choose_netology_email(page: Page, logger: RunLogger) -> bool:
+    try:
+        choice = page.get_by_text("Войти по почте", exact=True)
+        if await choice.count() and await choice.first.is_visible(timeout=500):
+            await choice.first.click(timeout=2_000)
+            logger.log("auto-login selected Netology email sign-in")
+            return True
+    except PlaywrightError:
+        pass
+    return False
+
+
+async def netology_captcha_visible(page: Page) -> bool:
+    try:
+        return (
+            await page.locator(
+                '[data-testid="advanced-container"].SmartCaptcha-Overlay_visible'
+            ).count()
+            > 0
+        )
+    except PlaywrightError:
+        return False
 
 
 def is_stuck_smart_lms_login(url: str) -> bool:

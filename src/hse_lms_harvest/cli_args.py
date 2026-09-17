@@ -43,6 +43,16 @@ def build_parser() -> argparse.ArgumentParser:
     add_browser_args(harvest)
     harvest.add_argument("--url", required=True, help="Course or assignment URL to start from.")
     harvest.add_argument(
+        "--assignments-only",
+        action="store_true",
+        help="On Netology, follow the course schedule, practice index and open assignment pages only.",
+    )
+    harvest.add_argument(
+        "--open-netology-assignments",
+        action="store_true",
+        help="On Netology, press 'Приступить к заданию' to reveal the full assignment; never submit a solution.",
+    )
+    harvest.add_argument(
         "--out", default=str(DEFAULT_DUMPS_DIR), help="Output directory for dumps."
     )
     harvest.add_argument(

@@ -18,6 +18,12 @@ def test_classifies_moodle_files() -> None:
         classify_link("Презентация MSF", "https://smart-lms.hse.ru/mod/resource/view.php?id=10")
         == "file"
     )
+    assert (
+        classify_link(
+            "Материалы для преподавателей", "https://edu.hse.ru/course/section.php?id=1494352"
+        )
+        == "page"
+    )
 
 
 def test_does_not_queue_unsafe_course_links() -> None:

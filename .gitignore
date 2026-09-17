@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .browser-profile/
+.browser-profile-netology/
 dumps/
 *.log
 .DS_Store

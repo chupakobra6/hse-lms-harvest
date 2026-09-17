@@ -17,6 +17,7 @@ from .downloads import download_files
 from .file_cache import FileCache
 from .manifest import page_content_fingerprint, response_metadata
 from .model import Button, Link, PageCapture
+from .netology import is_netology_url, open_assignment_for_reading, prepare_page
 from .privacy import has_sensitive_query, redact_url, strip_fragment
 from .text import normalize_line, split_visible_text
 
@@ -246,6 +247,32 @@ async def capture_page(
                 },
             )
 
+    try:
+        await prepare_page(page, url)
+    except PlaywrightError as exc:
+        capture.errors.append(f"netology readiness: {safe_error(exc)}")
+        await diagnostics.error(
+            "netology_page_not_ready",
+            "Netology course view did not finish loading",
+            page=page,
+            page_index=index,
+            url=url,
+            exc=exc,
+        )
+    if getattr(args, "open_netology_assignments", False) and is_netology_url(url):
+        try:
+            if await open_assignment_for_reading(page, url):
+                logger.log(f"Netology assignment opened for reading: {redact_url(url)}")
+        except PlaywrightError as exc:
+            capture.errors.append(f"netology assignment opening: {safe_error(exc)}")
+            await diagnostics.error(
+                "netology_assignment_open_failed",
+                "Netology assignment could not be opened for reading",
+                page=page,
+                page_index=index,
+                url=url,
+                exc=exc,
+            )
     await expand_read_only_controls(page, network_idle_timeout_ms, logger, diagnostics, index)
     if args.visit_action_pages:
         await open_submission_form_for_reading(
@@ -271,6 +298,16 @@ async def capture_page(
             exc=exc,
         )
         data = {"title": await page.title(), "heading": "", "text": "", "links": [], "buttons": []}
+
+    if is_netology_url(url) and data.get("title") == "Нетология — образовательная платформа":
+        capture.errors.append("snapshot: Netology view remained an unloaded shell")
+        await diagnostics.error(
+            "netology_empty_shell",
+            "Netology view remained an unloaded shell",
+            page=page,
+            page_index=index,
+            url=url,
+        )
 
     final_url = page.url
     capture.final_url = redact_url(final_url) if has_sensitive_query(final_url) else final_url
@@ -489,15 +526,22 @@ def capture_has_network_disconnect(capture: PageCapture) -> bool:
 
 def build_links(raw_links: list[dict[str, str]], base_url: str) -> list[Link]:
     result: list[Link] = []
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
     for raw in raw_links:
         href = strip_fragment(urljoin(base_url, raw.get("href") or ""))
         text = normalize_line(raw.get("text") or raw.get("title") or href)
-        if not href or href in seen:
+        if not href:
             continue
         if is_ignored_capture_url(href):
             continue
-        seen.add(href)
+        if href in seen:
+            index = seen[href]
+            if is_netology_url(href) and result[index].text in {"Доступа пока нет", "Доступ с"}:
+                result[index] = Link(
+                    text=text, url=result[index].url, kind=classify_link(text, href)
+                )
+            continue
+        seen[href] = len(result)
         kind = classify_link(text, href)
         stored_href = redact_url(href) if kind == "unsafe" or has_sensitive_query(href) else href
         result.append(Link(text=text, url=stored_href, kind=kind))
@@ -564,4 +608,16 @@ def should_queue_link(link: Link, start_url: str, args: argparse.Namespace) -> b
 
     if parsed.netloc != start.netloc:
         return args.include_external and link.kind == "page"
+    if is_netology_url(start_url):
+        if getattr(args, "assignments_only", False):
+            if link.text.startswith(("Доступа пока нет", "Доступ с")):
+                return False
+            if parsed.path.endswith(("/execution", "/execution/tasks")):
+                return looks_like_course_link(link.url, start_url)
+            if "/lesson_items/" not in parsed.path or not any(
+                marker in link.text.casefold()
+                for marker in ("задание", "практическая работа", "лабораторная работа")
+            ):
+                return False
+        return link.kind == "page" and looks_like_course_link(link.url, start_url)
     return looks_like_course_link(link.url, start_url)

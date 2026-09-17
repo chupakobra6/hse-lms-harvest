@@ -5,7 +5,7 @@ import argparse
 from .model import PageCapture
 from .privacy import redact_url, strip_fragment
 
-CAPTURE_VERSION = 1
+CAPTURE_VERSION = 4
 COVERAGE_VERSION = 1
 
 
@@ -13,6 +13,7 @@ def capture_contract(args: argparse.Namespace) -> dict[str, object]:
     """Settings that change extracted HTML, independently of attachment policy."""
     return {
         "capture_version": CAPTURE_VERSION,
+        "open_netology_assignments": getattr(args, "open_netology_assignments", False),
         **{
             name: getattr(args, name)
             for name in (
@@ -30,6 +31,7 @@ def coverage_scope(args: argparse.Namespace, start_url: str) -> dict[str, object
     return {
         "source_url": redact_url(strip_fragment(start_url)),
         **capture_contract(args),
+        "assignments_only": getattr(args, "assignments_only", False),
         **{
             name: getattr(args, name)
             for name in (
