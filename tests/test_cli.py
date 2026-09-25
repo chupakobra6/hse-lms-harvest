@@ -1,6 +1,8 @@
 import asyncio
 
-from hse_lms_harvest.cli import build_parser, page_looks_logged_in
+import pytest
+
+from hse_lms_harvest.cli import build_parser, page_looks_logged_in, run_harvest
 
 
 class FakeLocator:
@@ -39,6 +41,21 @@ def test_harvest_can_skip_action_pages_explicitly() -> None:
     args = parser.parse_args(["harvest", "--url", "about:blank", "--skip-action-pages"])
 
     assert args.visit_action_pages is False
+
+
+def test_netology_rejects_parallel_assignment_navigation() -> None:
+    args = build_parser().parse_args(
+        [
+            "harvest",
+            "--url",
+            "https://netology.ru/profile/program/course/schedule",
+            "--page-concurrency",
+            "2",
+            "--open-netology-assignments",
+        ]
+    )
+    with pytest.raises(RuntimeError, match="requires --page-concurrency 1"):
+        asyncio.run(run_harvest(args))
 
 
 def test_harvest_debug_defaults_keep_error_bundles_compact() -> None:

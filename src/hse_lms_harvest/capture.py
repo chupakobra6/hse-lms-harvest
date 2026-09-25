@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import re
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -193,7 +195,10 @@ async def capture_page(
     screenshots: ScreenshotPolicy,
     file_cache: FileCache | None,
     diagnostics: DiagnosticRecorder,
+    download_lock: asyncio.Lock | None = None,
 ) -> PageCapture:
+    started = time.monotonic()
+    phases: dict[str, float] = {}
     capture = PageCapture(
         index=index,
         url=url,
@@ -229,6 +234,7 @@ async def capture_page(
             url=url,
             exc=exc,
         )
+    phases["navigation_ms"] = round((time.monotonic() - started) * 1000)
 
     network_idle_timeout_ms = network_idle_timeout_for_url(url, args)
     if network_idle_timeout_ms > 0:
@@ -283,6 +289,7 @@ async def capture_page(
         await click_completion_toggles(page, logger, diagnostics, index)
     await wait_for_body(page)
     await save_screenshot(page, debug_dir, f"page-{index:04d}", logger, screenshots, kind="page")
+    phases["readiness_ms"] = round((time.monotonic() - started) * 1000) - phases["navigation_ms"]
 
     try:
         data = await page.evaluate(PAGE_SNAPSHOT_SCRIPT)
@@ -316,7 +323,9 @@ async def capture_page(
         capture.source_metadata = {}
     if any(part in urlparse(final_url).path.lower() for part in ("/login", "/auth/", "/sso")):
         capture.errors.append("navigation: login page instead of requested content")
-        await diagnostics.error("page_requires_login", "Capture reached a login page", url=url)
+        await diagnostics.error(
+            "page_requires_login", "Capture reached a login page", page_index=index, url=url
+        )
     capture.title = data.get("title") or await page.title()
     capture.heading = data.get("heading") or capture.title
     raw_links = data.get("links") or []
@@ -325,33 +334,53 @@ async def capture_page(
     capture.links = build_links(raw_links, final_url)
     capture.buttons = build_buttons(data.get("buttons") or [])
     capture.content_fingerprint = page_content_fingerprint(capture)
+    phases["snapshot_ms"] = round((time.monotonic() - started) * 1000) - sum(phases.values())
 
     if args.download_files:
-        capture.downloaded_files = await download_files(
-            context,
-            files_dir,
-            capture.links,
-            args.url,
-            logger,
-            downloaded_urls,
-            args.download_media,
-            args.skip_lms_file_server,
-            args.max_file_mb,
-            args.download_concurrency,
-            args.file_head_timeout_ms,
-            args.file_download_timeout_ms,
-            args.trust_file_cache,
-            file_cache,
-            diagnostics,
-        )
+
+        async def save_files() -> list[str]:
+            return await download_files(
+                context,
+                files_dir,
+                capture.links,
+                args.url,
+                logger,
+                downloaded_urls,
+                args.download_media,
+                args.skip_lms_file_server,
+                args.max_file_mb,
+                args.download_concurrency,
+                args.file_head_timeout_ms,
+                args.file_download_timeout_ms,
+                args.trust_file_cache,
+                file_cache,
+                diagnostics,
+            )
+
+        if download_lock is None:
+            capture.downloaded_files = await save_files()
+        else:
+            async with download_lock:
+                capture.downloaded_files = await save_files()
 
     for error in diagnostics.errors[diagnostic_start:]:
+        if error.get("page_index") != index:
+            continue
         if error.get("code") not in {
             "file_download_failed",
             "file_download_http_error",
             "file_download_html",
         }:
             capture.errors.append(f"capture: {error['code']}")
+    phases["files_ms"] = round((time.monotonic() - started) * 1000) - sum(phases.values())
+    diagnostics.event(
+        "info",
+        "page_timing",
+        "Page capture stage timings",
+        page_index=index,
+        url=url,
+        details=phases,
+    )
     return capture
 
 

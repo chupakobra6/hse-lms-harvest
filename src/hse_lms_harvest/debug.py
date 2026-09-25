@@ -72,6 +72,7 @@ class DiagnosticRecorder:
         self.errors_markdown_path = debug_dir / "errors.md"
         self.errors_dir = debug_dir / "errors"
         self.errors: list[dict[str, Any]] = []
+        self._next_error_id = 0
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.events_path.write_text("", encoding="utf-8")
         self.write_errors()
@@ -113,7 +114,8 @@ class DiagnosticRecorder:
         details: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         error_slug = stable_slug(code.replace("_", "-"), fallback="error")
-        error_id = f"{len(self.errors) + 1:04d}-{error_slug}"
+        self._next_error_id += 1
+        error_id = f"{self._next_error_id:04d}-{error_slug}"
         error_dir = self.errors_dir / error_id
         error_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -13,7 +14,16 @@ from hse_lms_harvest.manifest import latest_manifest_path, render_dump_from_mani
 
 @pytest.fixture
 def course_source():
-    state = SimpleNamespace(links=[1, 2], failed=set(), validators=True, counts=Counter())
+    state = SimpleNamespace(
+        links=[1, 2],
+        failed=set(),
+        validators=True,
+        counts=Counter(),
+        delay=0.0,
+        active=0,
+        max_active=0,
+        lock=threading.Lock(),
+    )
 
     class Handler(BaseHTTPRequestHandler):
         def do_HEAD(self):
@@ -24,6 +34,12 @@ def course_source():
 
         def respond(self, body):
             state.counts[(self.command, self.path)] += 1
+            delayed = body and state.delay and self.path.startswith("/mod/")
+            if delayed:
+                with state.lock:
+                    state.active += 1
+                    state.max_active = max(state.max_active, state.active)
+                time.sleep(state.delay)
             root = self.path.startswith("/course/")
             status = 503 if self.path in state.failed else 200
             html = (
@@ -43,6 +59,9 @@ def course_source():
             self.end_headers()
             if body:
                 self.wfile.write(html.encode())
+            if delayed:
+                with state.lock:
+                    state.active -= 1
 
         def log_message(self, *_args):
             pass
@@ -212,3 +231,21 @@ def test_resume_moves_past_persistently_broken_first_link(tmp_path, course_sourc
     code, _, complete = harvest(tmp_path, source, "--max-pages", "1", "--resume-latest")
     assert code == 0
     assert len(complete["coverage"]["confirmed_urls"]) == 3
+
+
+def test_two_pages_capture_concurrently_without_losing_scope(tmp_path, course_source):
+    source = course_source
+    source.links = [1, 2, 3, 4]
+    source.delay = 0.2
+    code, _, first = harvest(tmp_path, source, "--page-concurrency", "2", "--max-pages", "3")
+    assert code == 1
+    assert len(first["pages"]) == 3
+    assert len(first["coverage"]["remaining_urls"]) == 2
+    code, _, complete = harvest(
+        tmp_path, source, "--page-concurrency", "2", "--max-pages", "2", "--resume-latest"
+    )
+    assert code == 0
+    assert complete["coverage"]["status"] == "complete"
+    assert len(complete["pages"]) == len(complete["coverage"]["confirmed_urls"]) == 5
+    assert len({page["url"] for page in complete["pages"]}) == 5
+    assert source.max_active >= 2

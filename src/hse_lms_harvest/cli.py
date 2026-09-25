@@ -209,6 +209,10 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
 async def run_harvest(args: argparse.Namespace) -> int:
     if args.max_pages < 1:
         raise RuntimeError("--max-pages must be positive")
+    if not 1 <= args.page_concurrency <= 3:
+        raise RuntimeError("--page-concurrency must be between 1 and 3")
+    if is_netology_url(args.url) and args.page_concurrency != 1:
+        raise RuntimeError("Netology requires --page-concurrency 1 for assignment navigation")
     if args.assignments_only and not is_netology_url(args.url):
         raise RuntimeError("--assignments-only is supported only for Netology course URLs")
     if args.open_netology_assignments and not is_netology_url(args.url):
@@ -327,6 +331,13 @@ async def run_harvest(args: argparse.Namespace) -> int:
                 context, page, args.url, args, debug_dir, logger, screenshots, diagnostics
             )
 
+        workers = [page]
+        for _ in range(args.page_concurrency - 1):
+            worker = await context.new_page()
+            worker.set_default_timeout(12_000)
+            workers.append(worker)
+        download_lock = asyncio.Lock()
+
         resolved_start_url = await resolve_course_url(
             page, args.url, args.course_title, debug_dir, logger, screenshots, diagnostics
         )
@@ -356,6 +367,43 @@ async def run_harvest(args: argparse.Namespace) -> int:
         queued.add(strip_fragment(resolved_start_url))
         new_page_count = 0
         checkpoint()
+
+        async def capture_one(url: str, index: int, worker: Page) -> tuple[PageCapture, bool]:
+            capture = None
+            if strip_fragment(url) not in live_refresh_urls:
+                # The cache may materialize attachments; serialize those writes.
+                async with download_lock:
+                    capture = await maybe_reuse_page(
+                        context,
+                        url,
+                        index,
+                        args,
+                        page_reuse,
+                        out_dir,
+                        logger,
+                        diagnostics,
+                        file_cache=file_cache,
+                        downloaded_urls=downloaded_urls,
+                    )
+            if capture is not None:
+                return capture, True
+            logger.log(f"[{index}] capture {safe_url(url)}")
+            return await capture_page(
+                context,
+                worker,
+                url,
+                index,
+                args,
+                files_dir,
+                debug_dir,
+                logger,
+                downloaded_urls,
+                screenshots,
+                file_cache,
+                diagnostics,
+                download_lock=download_lock,
+            ), False
+
         try:
             while queue:
                 if resume_order:
@@ -370,72 +418,62 @@ async def run_harvest(args: argparse.Namespace) -> int:
                             ),
                         )
                     )
-                url = queue.popleft()
-                url_key = strip_fragment(url)
-                if url_key in visited:
-                    continue
-                if url_key not in resume_confirmed and new_page_count >= args.max_pages:
-                    pending.append(url_key)
-                    continue
-                if url_key not in resume_confirmed:
-                    new_page_count += 1
-                visited.add(url_key)
-                index = len(pages) + 1
-                # Persist the in-flight URL until the page and its discovered links are saved.
-                pending.append(url_key)
-                checkpoint()
-                capture = None
-                if url_key not in live_refresh_urls:
-                    capture = await maybe_reuse_page(
-                        context,
-                        url,
-                        index,
-                        args,
-                        page_reuse,
-                        out_dir,
-                        logger,
-                        diagnostics,
-                        file_cache=file_cache,
-                        downloaded_urls=downloaded_urls,
-                    )
-                if capture is not None:
-                    reused_page_count += 1
-                else:
-                    logger.log(f"[{index}] capture {safe_url(url)}")
-                    capture = await capture_page(
-                        context,
-                        page,
-                        url,
-                        index,
-                        args,
-                        files_dir,
-                        debug_dir,
-                        logger,
-                        downloaded_urls,
-                        screenshots,
-                        file_cache,
-                        diagnostics,
-                    )
-                pages.append(capture)
-                pending.remove(url_key)
-                for link in capture.links:
-                    link_key = strip_fragment(link.url)
-                    if link_key == strip_fragment(capture.final_url):
+                batch: list[tuple[str, str, int, Page]] = []
+                while queue and len(batch) < len(workers):
+                    url = queue.popleft()
+                    url_key = strip_fragment(url)
+                    if url_key in visited:
                         continue
-                    if link_key in visited or link_key in queued:
+                    if url_key not in resume_confirmed and new_page_count >= args.max_pages:
+                        pending.append(url_key)
                         continue
-                    if should_queue_link(link, resolved_start_url, args):
-                        queue.append(link.url)
-                        queued.add(link_key)
+                    if url_key not in resume_confirmed:
+                        new_page_count += 1
+                    visited.add(url_key)
+                    batch.append((url, url_key, len(pages) + len(batch) + 1, workers[len(batch)]))
+                if not batch:
+                    continue
+                # Preserve every in-flight URL before starting concurrent browser work.
+                pending.extend(item[1] for item in batch)
                 checkpoint()
-                if capture_has_network_disconnect(capture):
-                    stop_reason = "capture_error"
-                    diagnostics.warning(
-                        "network_disconnected_abort",
-                        "Network disconnected; partial dump saved",
-                        page_index=index,
-                        url=url,
-                    )
+                results = await asyncio.gather(
+                    *(capture_one(url, index, worker) for url, _, index, worker in batch),
+                    return_exceptions=True,
+                )
+                failure = None
+                for (url, url_key, index, _), result in zip(batch, results, strict=True):
+                    if isinstance(result, BaseException):
+                        failure = failure or result
+                        continue
+                    if failure is not None:
+                        # Keep later captures pending rather than creating gaps in
+                        # page indexes if an earlier worker failed.
+                        continue
+                    capture, reused = result
+                    reused_page_count += int(reused)
+                    pages.append(capture)
+                    pending.remove(url_key)
+                    for link in capture.links:
+                        link_key = strip_fragment(link.url)
+                        if link_key == strip_fragment(capture.final_url):
+                            continue
+                        if link_key in visited or link_key in queued:
+                            continue
+                        if should_queue_link(link, resolved_start_url, args):
+                            queue.append(link.url)
+                            queued.add(link_key)
+                    checkpoint()
+                    if capture_has_network_disconnect(capture):
+                        stop_reason = "capture_error"
+                        diagnostics.warning(
+                            "network_disconnected_abort",
+                            "Network disconnected; partial dump saved",
+                            page_index=index,
+                            url=url,
+                        )
+                if failure is not None:
+                    raise failure
+                if stop_reason:
                     break
         except (Exception, asyncio.CancelledError) as exc:
             stop_reason = "interrupted"

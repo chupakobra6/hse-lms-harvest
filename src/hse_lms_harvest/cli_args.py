@@ -62,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum new/unconfirmed pages per run; resume revalidates confirmed pages separately.",
     )
     harvest.add_argument(
+        "--page-concurrency",
+        type=int,
+        default=1,
+        help="Independent course pages to capture at once (1-3); file writes stay serialized.",
+    )
+    harvest.add_argument(
         "--network-idle-timeout-ms",
         type=int,
         default=DEFAULT_NETWORK_IDLE_TIMEOUT_MS,
