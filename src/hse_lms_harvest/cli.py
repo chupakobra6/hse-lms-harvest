@@ -84,14 +84,16 @@ def run_credentials(args: argparse.Namespace) -> None:
     env_file = Path(args.env_file)
     if args.credentials_command == "set":
         password = read_password_from_user(password_stdin=args.password_stdin)
-        store_password(args.username, password, env_file, credential_helper=args.credential_helper)
+        store_password(
+            args.source, args.username, password, env_file, credential_helper=args.credential_helper
+        )
         print(f"Credentials stored and verified for {args.username} through the configured helper.")
         return
     if args.credentials_command == "status":
-        print(credentials_status(env_file))
+        print(credentials_status(args.source, env_file))
         return
     if args.credentials_command == "delete":
-        delete_password(env_file)
+        delete_password(args.source, env_file)
         print("Credentials deleted.")
         return
     raise RuntimeError(f"unknown credentials command: {args.credentials_command}")
@@ -564,9 +566,10 @@ async def ensure_logged_in(
 
     if args.auto_login:
         env_file = Path(args.env_file)
-        username = args.username or load_default_username(env_file)
+        source = "netology" if is_netology_url(start_url) else "smart_lms"
+        username = args.username or load_default_username(source, env_file)
         try:
-            password = load_password(username, env_file)
+            password = load_password(source, username, env_file)
         except CredentialError as exc:
             await diagnostics.error("credential_unavailable", str(exc))
             raise

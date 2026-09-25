@@ -264,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     credentials_set = credentials_subparsers.add_parser(
         "set", help="Store the password through a credential helper and save non-secret config."
     )
+    credentials_set.add_argument("--source", required=True, choices=("smart_lms", "netology"))
     credentials_set.add_argument("--username", required=True)
     credentials_set.add_argument(
         "--credential-helper",
@@ -285,11 +286,15 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="Show whether credentials are configured."
     )
     credentials_status_parser.add_argument(
+        "--source", required=True, choices=("smart_lms", "netology")
+    )
+    credentials_status_parser.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="Project .env file to inspect."
     )
     credentials_delete = credentials_subparsers.add_parser(
         "delete", help="Delete stored credentials."
     )
+    credentials_delete.add_argument("--source", required=True, choices=("smart_lms", "netology"))
     credentials_delete.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="Project .env file to update."
     )

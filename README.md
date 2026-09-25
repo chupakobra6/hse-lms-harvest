@@ -48,11 +48,17 @@ uv sync --extra dev
 make check
 ```
 
-Сначала настройте установленный внешний помощник хранения пароля. Команда запрашивает пароль без отображения; в `.env` сохраняются только имя пользователя, путь помощника и имя сервиса:
+Сначала настройте установленный внешний помощник хранения пароля. Smart LMS и Netology используют один `.env`: в нём находятся два имени пользователя, общий путь помощника и имя сервиса. Пароли двух аккаунтов хранятся в Keychain по имени аккаунта. Для каждой платформы выполните `credentials set` с её `--source`; команда запрашивает пароль без отображения:
 
 ```bash
 uv run hse-lms-harvest credentials set \
+  --source smart_lms \
   --username "student@example.edu" \
+  --credential-helper "/absolute/path/to/study-keychain" \
+  --env-file ".env"
+uv run hse-lms-harvest credentials set \
+  --source netology \
+  --username "netology@example.edu" \
   --credential-helper "/absolute/path/to/study-keychain" \
   --env-file ".env"
 ```
@@ -63,7 +69,7 @@ uv run hse-lms-harvest credentials set \
 - Успешный `get` возвращает `secret`, остальные успешные операции — `{}`. Ошибка содержит поле `error`: `not-found`, `locked`, `interaction-required`, `access-denied` или `user-canceled`.
 - Помощник работает без интерактивных подтверждений; таймаут вызова — 10 секунд. Пароль не передаётся в аргументах, переменных окружения или диагностике. Для настройки из другого процесса есть `credentials set --password-stdin`.
 
-`credentials status --env-file .env` проверяет доступность через `check`, не запрашивая пароль. `credentials delete --env-file .env` удаляет секрет и локальную конфигурацию. `HSE_LMS_PASSWORD` не читается ни из `.env`, ни из окружения. При переходе на помощник выполните `credentials set` с существующим паролем: прежняя запись удаляется после успешного сохранения и обратного чтения. Фоновый вход сообщает о недоступном секрете или ошибке авторизации и не ждёт ручного ввода.
+`credentials status --source smart_lms` и `credentials status --source netology` проверяют доступность через `check`, не запрашивая пароль. `credentials delete --source <платформа>` удаляет только выбранный секрет и его имя пользователя; общие настройки остаются, пока настроена вторая платформа. `HSE_LMS_PASSWORD` не читается ни из `.env`, ни из окружения. Фоновый вход сообщает о недоступном секрете или ошибке авторизации и не ждёт ручного ввода.
 
 Сбор курса:
 
@@ -92,7 +98,7 @@ uv run hse-lms-harvest --help
 ```bash
 uv run hse-lms-harvest harvest \
   --url "https://netology.ru/profile/program/EXACT-MODULE/schedule" \
-  --profile ".browser-profile-netology" --env-file ".env.netology" \
+  --profile ".browser-profile-netology" --env-file ".env" \
   --out "dumps/netology-current/MODULE" --headless --ensure-login --auto-login \
   --assignments-only --open-netology-assignments --download-files --page-cache off
 ```

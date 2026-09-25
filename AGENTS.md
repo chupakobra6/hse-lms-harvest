@@ -52,7 +52,7 @@
 - Общее ожидание `networkidle` по умолчанию отключено ради скорости; корневые `/course/view.php` ждут короткий `--course-network-idle-timeout-ms`, чтобы не потерять лениво загружаемое оглавление. Не добавляй долгие sleep без теста и причины.
 
 ## Приватность и секреты
-- LMS-пароль хранится только через внешний noninteractive JSON helper: `credentials set --credential-helper /absolute/path` сохраняет в `.env` лишь username, helper и service. Контракт операций описан в README; `HSE_LMS_PASSWORD` не читать ни из файла, ни из окружения.
+- Пароли Smart LMS и Netology хранятся только через внешний noninteractive JSON helper: `credentials set --source smart_lms|netology --credential-helper /absolute/path` сохраняет в общем `.env` два имени пользователя, helper и service. Контракт операций описан в README; `HSE_LMS_PASSWORD` не читать ни из файла, ни из окружения.
 - Секрет передавать helper только через stdin; timeout — 10 секунд. Его stdout/stderr не включать в ошибки. `status` использует `check`, а headless auto-login при недоступном секрете завершается с диагностикой без ожидания ручного входа.
 - Никогда не коммить и не включай в ответы содержимое `.env`, `.browser-profile/`, cookies, личные URL с токенами, private screenshots, `dumps/`, `harvest.log`.
 - Не печатай пароль, cookies, `sesskey`, auth headers или приватные query tokens.

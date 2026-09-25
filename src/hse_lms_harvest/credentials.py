@@ -8,7 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-ENV_USERNAME = "HSE_LMS_USERNAME"
+USERNAME_KEYS = {
+    "smart_lms": "SMART_LMS_USERNAME",
+    "netology": "NETOLOGY_USERNAME",
+}
 ENV_HELPER = "HSE_LMS_CREDENTIAL_HELPER"
 ENV_SERVICE = "HSE_LMS_CREDENTIAL_SERVICE"
 DEFAULT_SERVICE = "codex-study-lms"
@@ -20,12 +23,14 @@ class CredentialError(RuntimeError):
 
 
 def store_password(
+    source: str,
     username: str,
     password: str,
     env_file: Path = DEFAULT_ENV_FILE,
     *,
     credential_helper: Path,
 ) -> None:
+    key = username_key(source)
     if not username:
         raise CredentialError("Username is empty.")
     if not password:
@@ -34,8 +39,15 @@ def store_password(
     env_file = env_file.expanduser().resolve()
     env_file.parent.mkdir(parents=True, exist_ok=True)
     values = read_env_file(env_file)
-    values[ENV_USERNAME] = username
-    values[ENV_HELPER] = str(helper_path(str(credential_helper)))
+    helper = str(helper_path(str(credential_helper)))
+    if any(values.get(other_key) for other_key in USERNAME_KEYS.values() if other_key != key) and (
+        values.get(ENV_HELPER) != helper or values.get(ENV_SERVICE) != DEFAULT_SERVICE
+    ):
+        raise CredentialError(
+            "Both sources must use the same configured credential helper and service."
+        )
+    values[key] = username
+    values[ENV_HELPER] = helper
     values[ENV_SERVICE] = DEFAULT_SERVICE
     call_helper(values, "put", username, secret=password)
     if call_helper(values, "get", username).get("secret") != password:
@@ -44,13 +56,22 @@ def store_password(
     write_env_file(env_file, values)
 
 
-def load_default_username(env_file: Path = DEFAULT_ENV_FILE) -> str | None:
-    return os.environ.get(ENV_USERNAME) or read_env_file(env_file).get(ENV_USERNAME)
+def username_key(source: str) -> str:
+    try:
+        return USERNAME_KEYS[source]
+    except KeyError:
+        raise CredentialError(f"Unknown credential source: {source}.") from None
 
 
-def load_password(username: str | None = None, env_file: Path = DEFAULT_ENV_FILE) -> str | None:
+def load_default_username(source: str, env_file: Path = DEFAULT_ENV_FILE) -> str | None:
+    return read_env_file(env_file).get(username_key(source))
+
+
+def load_password(
+    source: str, username: str | None = None, env_file: Path = DEFAULT_ENV_FILE
+) -> str | None:
     values = read_env_file(env_file)
-    stored_username = os.environ.get(ENV_USERNAME) or values.get(ENV_USERNAME)
+    stored_username = values.get(username_key(source))
     if username and stored_username != username:
         return None
     if not stored_username:
@@ -64,25 +85,27 @@ def load_password(username: str | None = None, env_file: Path = DEFAULT_ENV_FILE
     return secret
 
 
-def delete_password(env_file: Path = DEFAULT_ENV_FILE) -> None:
+def delete_password(source: str, env_file: Path = DEFAULT_ENV_FILE) -> None:
     env_file = env_file.expanduser().resolve()
     if not env_file.exists():
         return
     values = read_env_file(env_file)
-    username = values.get(ENV_USERNAME)
+    key = username_key(source)
+    username = values.get(key)
     if username:
         call_helper(values, "delete", username)
-    values.pop(ENV_USERNAME, None)
-    values.pop(ENV_HELPER, None)
-    values.pop(ENV_SERVICE, None)
+    values.pop(key, None)
+    if not any(values.get(other_key) for other_key in USERNAME_KEYS.values()):
+        values.pop(ENV_HELPER, None)
+        values.pop(ENV_SERVICE, None)
     values.pop("HSE_LMS_PASSWORD", None)
     write_env_file(env_file, values)
 
 
-def credentials_status(env_file: Path = DEFAULT_ENV_FILE) -> str:
+def credentials_status(source: str, env_file: Path = DEFAULT_ENV_FILE) -> str:
     env_file = env_file.expanduser().resolve()
     values = read_env_file(env_file)
-    username = os.environ.get(ENV_USERNAME) or values.get(ENV_USERNAME)
+    username = values.get(username_key(source))
     if not username:
         return f"No credentials configured in {env_file}."
     response = call_helper(values, "check", username)
