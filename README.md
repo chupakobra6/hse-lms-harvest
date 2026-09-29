@@ -1,7 +1,7 @@
 <h1 align="center">hse-lms-harvest</h1>
 
 <p align="center">
-  Сбор страниц и учебных вложений Smart LMS и Netology для локальной автоматизации учёбы.
+  Сбор страниц и учебных вложений Smart LMS и Netology, а также заданий и материалов club404 для локальной автоматизации учёбы.
 </p>
 
 <p align="center">
@@ -48,7 +48,7 @@ uv sync --extra dev
 make check
 ```
 
-Сначала настройте установленный внешний помощник хранения пароля. Smart LMS и Netology используют один `.env`: в нём находятся два имени пользователя, общий путь помощника и имя сервиса. Пароли двух аккаунтов хранятся в Keychain по имени аккаунта. Для каждой платформы выполните `credentials set` с её `--source`; команда запрашивает пароль без отображения:
+Сначала настройте установленный внешний помощник хранения пароля. Smart LMS, Netology и club404 используют один `.env`: в нём находятся три имени пользователя, общий путь помощника и имя сервиса. Пароли хранятся в отдельных записях Keychain; для club404 аккаунт имеет префикс `club404:`, поскольку адрес почты может совпадать с Netology. Для каждой платформы выполните `credentials set` с её `--source`; команда запрашивает пароль без отображения:
 
 ```bash
 uv run hse-lms-harvest credentials set \
@@ -69,7 +69,7 @@ uv run hse-lms-harvest credentials set \
 - Успешный `get` возвращает `secret`, остальные успешные операции — `{}`. Ошибка содержит поле `error`: `not-found`, `locked`, `interaction-required`, `access-denied` или `user-canceled`.
 - Помощник работает без интерактивных подтверждений; таймаут вызова — 10 секунд. Пароль не передаётся в аргументах, переменных окружения или диагностике. Для настройки из другого процесса есть `credentials set --password-stdin`.
 
-`credentials status --source smart_lms` и `credentials status --source netology` проверяют доступность через `check`, не запрашивая пароль. `credentials delete --source <платформа>` удаляет только выбранный секрет и его имя пользователя; общие настройки остаются, пока настроена вторая платформа. `HSE_LMS_PASSWORD` не читается ни из `.env`, ни из окружения. Фоновый вход сообщает о недоступном секрете или ошибке авторизации и не ждёт ручного ввода.
+`credentials status --source smart_lms`, `credentials status --source netology` и `credentials status --source club404` проверяют доступность через `check`, не запрашивая пароль. `credentials delete --source <платформа>` удаляет только выбранный секрет и его имя пользователя; общие настройки остаются, пока настроена вторая платформа. `HSE_LMS_PASSWORD` не читается ни из `.env`, ни из окружения. Фоновый вход сообщает о недоступном секрете или ошибке авторизации и не ждёт ручного ввода.
 
 Сбор курса:
 
@@ -102,6 +102,19 @@ uv run hse-lms-harvest harvest \
   --out "dumps/netology-current/MODULE" --headless --ensure-login --auto-login \
   --assignments-only --open-netology-assignments --download-files --page-cache off
 ```
+
+### club404
+
+`club404-export` читает только выбранные предметы второго курса через отдельный профиль Chrome. Если сессия истекла, вход выполняется из Keychain в новом процессе; кнопки отправки работ не нажимаются. Для настройки используй `credentials set --source club404` с тем же helper, что и другие учебные платформы. Пример сбора:
+
+```bash
+uv run hse-lms-harvest club404-export --headless \
+  --profile "/absolute/private/club404/browser-profile" \
+  --env-file ".env" --out "/absolute/private/club404/scan.json" \
+  --subject algorithms-data-structures --subject bazy-dannykh
+```
+
+JSON содержит проверенные счётчики предметов, заданий и материалов, текст каждой страницы, показанный срок и ссылки. Вложения сохраняются ссылками без загрузки содержимого. Студенческая платформа — вторичный источник: дедлайны и личную применимость сверяй с ЛМС, Netology, расписанием и преподавателем. В частности, для задания по сетям сайт показывает произвольную дату 1 октября и прямо предупреждает об этом.
 
 <a id="capture-output"></a>
 

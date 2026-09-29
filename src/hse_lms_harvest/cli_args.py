@@ -39,6 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Wait for Enter instead of detecting login automatically.",
     )
 
+    club404 = subparsers.add_parser(
+        "club404-export", help="Export current club404 subject tasks and materials read-only."
+    )
+    club404.add_argument("--profile", required=True, type=Path)
+    club404.add_argument("--subject", required=True, action="append", dest="subjects")
+    club404.add_argument("--out", required=True, type=Path)
+    club404.add_argument("--headless", action="store_true")
+    club404.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
+
     harvest = subparsers.add_parser("harvest", help="Capture course pages and attachments.")
     add_browser_args(harvest)
     harvest.add_argument("--url", required=True, help="Course or assignment URL to start from.")
@@ -264,7 +273,9 @@ def build_parser() -> argparse.ArgumentParser:
     credentials_set = credentials_subparsers.add_parser(
         "set", help="Store the password through a credential helper and save non-secret config."
     )
-    credentials_set.add_argument("--source", required=True, choices=("smart_lms", "netology"))
+    credentials_set.add_argument(
+        "--source", required=True, choices=("smart_lms", "netology", "club404")
+    )
     credentials_set.add_argument("--username", required=True)
     credentials_set.add_argument(
         "--credential-helper",
@@ -286,7 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="Show whether credentials are configured."
     )
     credentials_status_parser.add_argument(
-        "--source", required=True, choices=("smart_lms", "netology")
+        "--source", required=True, choices=("smart_lms", "netology", "club404")
     )
     credentials_status_parser.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="Project .env file to inspect."
@@ -294,7 +305,9 @@ def build_parser() -> argparse.ArgumentParser:
     credentials_delete = credentials_subparsers.add_parser(
         "delete", help="Delete stored credentials."
     )
-    credentials_delete.add_argument("--source", required=True, choices=("smart_lms", "netology"))
+    credentials_delete.add_argument(
+        "--source", required=True, choices=("smart_lms", "netology", "club404")
+    )
     credentials_delete.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="Project .env file to update."
     )

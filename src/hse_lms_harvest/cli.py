@@ -19,6 +19,7 @@ from .auth import auto_login
 from .capture import capture_has_network_disconnect, capture_page, should_queue_link
 from .cleanup import run_cleanup
 from .cli_args import build_parser
+from .club404 import export as export_club404
 from .course import resolve_course_url
 from .coverage import coverage_scope, make_coverage
 from .credentials import (
@@ -63,6 +64,20 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(run_login(args))
         elif args.command == "harvest":
             return asyncio.run(run_harvest(args))
+        elif args.command == "club404-export":
+            result = asyncio.run(
+                export_club404(
+                    args.profile,
+                    args.subjects,
+                    args.out,
+                    headless=args.headless,
+                    env_file=args.env_file,
+                )
+            )
+            print(
+                f"club404 exported {len(result['items'])} items from "
+                f"{result['counts']['subjects']} subjects to {args.out}"
+            )
         elif args.command == "credentials":
             run_credentials(args)
         elif args.command == "cleanup":
@@ -191,6 +206,8 @@ async def page_looks_logged_in(page: Page, start_url: str) -> bool:
     lower_text = f"{title}\n{text}".lower()
     if is_netology_url(start_url):
         return await course_page_visible(page)
+    if start_host == "club404.ru":
+        return "/course/2" in lower_url and "404 club" in lower_text
     logged_in_markers = (
         "мои курсы",
         "вы зашли под именем",

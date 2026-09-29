@@ -11,6 +11,7 @@ from pathlib import Path
 USERNAME_KEYS = {
     "smart_lms": "SMART_LMS_USERNAME",
     "netology": "NETOLOGY_USERNAME",
+    "club404": "CLUB404_USERNAME",
 }
 ENV_HELPER = "HSE_LMS_CREDENTIAL_HELPER"
 ENV_SERVICE = "HSE_LMS_CREDENTIAL_SERVICE"
@@ -44,13 +45,14 @@ def store_password(
         values.get(ENV_HELPER) != helper or values.get(ENV_SERVICE) != DEFAULT_SERVICE
     ):
         raise CredentialError(
-            "Both sources must use the same configured credential helper and service."
+            "All sources must use the same configured credential helper and service."
         )
     values[key] = username
     values[ENV_HELPER] = helper
     values[ENV_SERVICE] = DEFAULT_SERVICE
-    call_helper(values, "put", username, secret=password)
-    if call_helper(values, "get", username).get("secret") != password:
+    account = credential_account(source, username)
+    call_helper(values, "put", account, secret=password)
+    if call_helper(values, "get", account).get("secret") != password:
         raise CredentialError("Credential helper did not verify the stored password.")
     values.pop("HSE_LMS_PASSWORD", None)
     write_env_file(env_file, values)
@@ -61,6 +63,11 @@ def username_key(source: str) -> str:
         return USERNAME_KEYS[source]
     except KeyError:
         raise CredentialError(f"Unknown credential source: {source}.") from None
+
+
+def credential_account(source: str, username: str) -> str:
+    # Netology may use the same email address; keep its password independent.
+    return f"club404:{username}" if source == "club404" else username
 
 
 def load_default_username(source: str, env_file: Path = DEFAULT_ENV_FILE) -> str | None:
@@ -76,7 +83,7 @@ def load_password(
         return None
     if not stored_username:
         return None
-    response = call_helper(values, "get", stored_username)
+    response = call_helper(values, "get", credential_account(source, stored_username))
     if response.get("error") == "not-found":
         return None
     secret = response.get("secret")
@@ -93,7 +100,7 @@ def delete_password(source: str, env_file: Path = DEFAULT_ENV_FILE) -> None:
     key = username_key(source)
     username = values.get(key)
     if username:
-        call_helper(values, "delete", username)
+        call_helper(values, "delete", credential_account(source, username))
     values.pop(key, None)
     if not any(values.get(other_key) for other_key in USERNAME_KEYS.values()):
         values.pop(ENV_HELPER, None)
@@ -108,7 +115,7 @@ def credentials_status(source: str, env_file: Path = DEFAULT_ENV_FILE) -> str:
     username = values.get(username_key(source))
     if not username:
         return f"No credentials configured in {env_file}."
-    response = call_helper(values, "check", username)
+    response = call_helper(values, "check", credential_account(source, username))
     if response.get("error") == "not-found":
         return f"No password stored for {username}; run credentials set."
     return f"Credentials available for {username} through the configured helper."

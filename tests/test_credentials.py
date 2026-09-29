@@ -25,11 +25,12 @@ from pathlib import Path
 root = Path(__file__).parent
 request = json.load(sys.stdin)
 assert len(sys.argv) == 1
-assert request['account'] in {'student@example.edu', 'netology@example.edu'}
+assert request['account'] in {'student@example.edu', 'netology@example.edu', 'club404:netology@example.edu'}
 assert request['service'] == 'codex-study-lms'
 assert 'HSE_LMS_PASSWORD' not in os.environ
 assert 'UNRELATED_API_TOKEN' not in os.environ
-secret_file = root / ('fake-store' if request['account'] == 'student@example.edu' else 'fake-store-netology')
+store_name = {'student@example.edu': 'fake-store', 'netology@example.edu': 'fake-store-netology', 'club404:netology@example.edu': 'fake-store-club404'}[request['account']]
+secret_file = root / store_name
 secret = request.get('secret') or (secret_file.read_text() if secret_file.exists() else '')
 if secret:
     assert secret not in '\0'.join(sys.argv)
@@ -164,6 +165,22 @@ def test_one_env_keeps_two_accounts_independent(tmp_path: Path, helper: Path) ->
     assert credentials.load_default_username("netology", env_file) is None
     assert (tmp_path / "fake-store").exists()
     assert not (tmp_path / "fake-store-netology").exists()
+
+
+def test_club404_keeps_same_email_independent_of_netology(tmp_path: Path, helper: Path) -> None:
+    env_file = tmp_path / ".env"
+    email = "netology@example.edu"
+    credentials.store_password(
+        "netology", email, "netology-secret", env_file, credential_helper=helper
+    )
+    credentials.store_password("club404", email, "club-secret", env_file, credential_helper=helper)
+    assert credentials.load_password("netology", email, env_file) == "netology-secret"
+    assert credentials.load_password("club404", email, env_file) == "club-secret"
+    assert credentials.credentials_status("club404", env_file).startswith("Credentials available")
+    assert "secret" not in env_file.read_text()
+    credentials.delete_password("club404", env_file)
+    assert credentials.load_password("netology", email, env_file) == "netology-secret"
+    assert not (tmp_path / "fake-store-club404").exists()
 
 
 def test_netology_login_selects_its_account_from_shared_env(
