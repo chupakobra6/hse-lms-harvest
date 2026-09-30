@@ -3,7 +3,12 @@ import asyncio
 import pytest
 from playwright.async_api import async_playwright
 
-from hse_lms_harvest.club404 import read_item, subject_links, validate_item_url
+from hse_lms_harvest.club404 import (
+    read_item,
+    strip_relative_badges,
+    subject_links,
+    validate_item_url,
+)
 
 
 def test_rejects_item_outside_current_course() -> None:
@@ -11,6 +16,13 @@ def test_rejects_item_outside_current_course() -> None:
         validate_item_url("/course/1/tasks/985", "task")
     with pytest.raises(ValueError, match="unexpected host"):
         validate_item_url("https://example.com/course/2/tasks/985", "task")
+
+
+def test_live_countdown_does_not_change_saved_content() -> None:
+    assert strip_relative_badges("Дедлайн 30 сен 2026, 23:5922 час.") == (
+        "Дедлайн 30 сен 2026, 23:59"
+    )
+    assert strip_relative_badges("Время выполнения: 120 минут") == "Время выполнения: 120 минут"
 
 
 def test_reads_task_and_checks_subject_counts() -> None:

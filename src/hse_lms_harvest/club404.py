@@ -34,6 +34,15 @@ def normalize_text(value: str) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def strip_relative_badges(value: str) -> str:
+    # Linked assignment cards append a live countdown directly after HH:MM.
+    return re.sub(
+        r"(?<=\d{2}:\d{2})\d+\s+(?:сек\.|мин\.|час\.|дн\.|день|дня|дней)",
+        "",
+        value,
+    )
+
+
 def validate_item_url(url: str, kind: str) -> str:
     parsed = urlparse(urljoin(BASE_URL, url))
     if parsed.scheme != "https" or parsed.netloc != "club404.ru":
@@ -109,7 +118,7 @@ async def read_item(page: Page, url: str, kind: str, expected_subject: str) -> C
     article = page.locator("main article")
     if await article.count() != 1:
         raise RuntimeError(f"club404 item has no unique article: {url}")
-    body = normalize_text(await article.text_content() or "")
+    body = strip_relative_badges(normalize_text(await article.text_content() or ""))
     if not body:
         raise RuntimeError(f"club404 item is empty: {url}")
     header = normalize_text(await page.locator("main header").first.inner_text())
@@ -120,7 +129,7 @@ async def read_item(page: Page, url: str, kind: str, expected_subject: str) -> C
     ).evaluate_all("els => els.map(el => ({label: (el.textContent || '').trim(), url: el.href}))")
     links = sorted(
         {
-            (normalize_text(link["label"]), link["url"].split("#", 1)[0])
+            (strip_relative_badges(normalize_text(link["label"])), link["url"].split("#", 1)[0])
             for link in raw_links
             if link["url"].startswith(("https://", "http://"))
         }
