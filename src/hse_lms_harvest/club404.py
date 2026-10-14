@@ -27,6 +27,7 @@ class Club404Item:
     deadline: str
     body: str
     links: list[dict[str, str]]
+    description_missing: bool = False
 
 
 def normalize_text(value: str) -> str:
@@ -115,13 +116,25 @@ async def read_item(page: Page, url: str, kind: str, expected_subject: str) -> C
     if subject_path != SUBJECT_PATH + expected_subject:
         raise RuntimeError(f"club404 item belongs to another subject: {url}")
     title = normalize_text(await page.locator("main h1").first.inner_text())
+    header = normalize_text(await page.locator("main header").first.inner_text())
     article = page.locator("main article")
-    if await article.count() != 1:
+    article_count = await article.count()
+    description_missing = article_count == 0
+    if description_missing:
+        # A fully loaded task may contain only its card header and solutions.
+        # Keep those source facts and mark the absent description explicitly.
+        solutions = page.locator("main section").get_by_role(
+            "heading", name=re.compile(r"^Решения(?:\s+\d+)?$")
+        )
+        if kind != "task" or await solutions.count() != 1:
+            raise RuntimeError(f"club404 item has no unique article: {url}")
+        body = strip_relative_badges(header)
+    elif article_count == 1:
+        body = strip_relative_badges(normalize_text(await article.text_content() or ""))
+    else:
         raise RuntimeError(f"club404 item has no unique article: {url}")
-    body = strip_relative_badges(normalize_text(await article.text_content() or ""))
     if not body:
         raise RuntimeError(f"club404 item is empty: {url}")
-    header = normalize_text(await page.locator("main header").first.inner_text())
     match = re.search(r"Дедлайн\s+([^\n]+)", header)
     deadline = match.group(1).strip() if kind == "task" and match else ""
     raw_links = await page.locator(
@@ -142,6 +155,7 @@ async def read_item(page: Page, url: str, kind: str, expected_subject: str) -> C
         deadline=deadline,
         body=body,
         links=[{"label": label, "url": link_url} for label, link_url in links],
+        description_missing=description_missing,
     )
 
 

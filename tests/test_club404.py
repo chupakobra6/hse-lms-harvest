@@ -61,3 +61,48 @@ def test_reads_task_and_checks_subject_counts() -> None:
                 await browser.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "kind,solutions,accepted",
+    [("task", True, True), ("task", False, False), ("material", True, False)],
+)
+def test_task_without_description_keeps_header_and_marks_gap(kind, solutions, accepted) -> None:
+    async def exercise() -> None:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(channel="chrome", headless=True)
+            try:
+                page = await browser.new_page()
+                url = f"https://club404.ru/course/2/{kind}s/1200"
+                html = (
+                    '<main><nav aria-label="Хлебные крошки">'
+                    '<a href="/course/2/subjects/net">Сети</a></nav>'
+                    "<header><h1>Согласовать тему</h1><p>Дедлайн 10 ноя 2026, 23:59</p></header>"
+                    + (
+                        "<section><h2>Решения</h2><button>Прикрепить решение</button></section>"
+                        if solutions
+                        else ""
+                    )
+                    + "</main>"
+                )
+                await page.route(
+                    url,
+                    lambda route: route.fulfill(
+                        status=200, body=html, content_type="text/html; charset=utf-8"
+                    ),
+                )
+                if accepted:
+                    item = await read_item(page, url, kind, "net")
+                    assert item.description_missing is True
+                    assert item.title == "Согласовать тему"
+                    assert item.deadline == "10 ноя 2026, 23:59"
+                    assert "Согласовать тему" in item.body
+                    assert "Дедлайн 10 ноя 2026, 23:59" in item.body
+                    assert "Прикрепить решение" not in item.body
+                else:
+                    with pytest.raises(RuntimeError, match="no unique article"):
+                        await read_item(page, url, kind, "net")
+            finally:
+                await browser.close()
+
+    asyncio.run(exercise())
