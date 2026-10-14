@@ -110,8 +110,7 @@
   `uv run hse-lms-harvest migrate --out dumps/current-subjects`
 
 ## Проверки по типу изменения
-- Любое изменение кода: `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`.
-- Изменение Markdown/summary рендера: дополнительно проверь, что в `pages/*.md` нет `https?://`, `sha256:`, `source:`, `pluginfile.php`, `Source:`, `Title:` и action URL.
+- Изменение Markdown/summary рендера: проверь, что в `pages/*.md` нет `https?://`, `sha256:`, `source:`, `pluginfile.php`, `Source:`, `Title:` и action URL.
 - Изменение navigation рендера: проверь, что `navigation.md` не содержит LMS URL/hash/source, но содержит локальные `pages/*.md`, `pages/*.json` и `files/...`.
 - Изменение JSON/manifest контракта: проверь readback тестом, что полные ссылки и file metadata не потерялись.
 - Изменение file download/cache: запускай `tests/test_file_cache.py`, релевантные `tests/test_cli.py`, и проверяй cached/materialized file path behavior.
