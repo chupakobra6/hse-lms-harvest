@@ -50,10 +50,22 @@ def is_course_page(url: str, start_url: str) -> bool:
     )
 
 
+def is_expected_final_page(requested: str, final: str) -> bool:
+    """Accept only the requested module page and its known practice redirect."""
+    source, target = urlparse(requested), urlparse(final)
+    if target.scheme != source.scheme or target.netloc != source.netloc or target.query:
+        return False
+    if target.path == source.path:
+        return True
+    return source.path.endswith("/execution") and target.path == source.path + "/tasks"
+
+
 async def prepare_page(page: Page, url: str) -> None:
     """Wait for the client-rendered view; expand schedule accordions only."""
     if not is_netology_url(url):
         return
+    if not is_expected_final_page(url, page.url):
+        raise PlaywrightError("Netology navigation reached an unexpected page")
     path = urlparse(url).path
     if path.endswith("/schedule"):
         await page.locator('[data-testid="program-lesson-title"]').first.wait_for(timeout=15_000)
@@ -61,7 +73,9 @@ async def prepare_page(page: Page, url: str) -> None:
         await page.evaluate(EXPAND_SCHEDULE_SCRIPT)
     elif path.endswith("/execution") or path.endswith("/execution/tasks"):
         await page.wait_for_function(
-            "document.title.startsWith('Практика ') && document.body.innerText.includes('На проверке')",
+            "document.title.startsWith('Практика ') && "
+            "(document.body.innerText.includes('На проверке') || "
+            "document.body.innerText.includes('На данном курсе нет практических заданий'))",
             timeout=15_000,
         )
     elif (match := MODULE_PATH.fullmatch(path)) and LESSON_ITEM_PATH.fullmatch(
@@ -79,6 +93,8 @@ async def prepare_page(page: Page, url: str) -> None:
                 "button.textContent?.trim() === 'Приступить к заданию')",
                 timeout=15_000,
             )
+    if not is_expected_final_page(url, page.url):
+        raise PlaywrightError("Netology navigation reached an unexpected page")
 
 
 async def course_page_visible(page: Page) -> bool:

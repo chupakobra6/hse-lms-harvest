@@ -19,7 +19,12 @@ from .downloads import download_files
 from .file_cache import FileCache
 from .manifest import page_content_fingerprint, response_metadata
 from .model import Button, Link, PageCapture
-from .netology import is_netology_url, open_assignment_for_reading, prepare_page
+from .netology import (
+    is_expected_final_page,
+    is_netology_url,
+    open_assignment_for_reading,
+    prepare_page,
+)
 from .privacy import has_sensitive_query, redact_url, strip_fragment
 from .text import normalize_line, split_visible_text
 
@@ -265,7 +270,11 @@ async def capture_page(
             url=url,
             exc=exc,
         )
-    if getattr(args, "open_netology_assignments", False) and is_netology_url(url):
+    if (
+        getattr(args, "open_netology_assignments", False)
+        and is_netology_url(url)
+        and is_expected_final_page(url, page.url)
+    ):
         try:
             if await open_assignment_for_reading(page, url):
                 logger.log(f"Netology assignment opened for reading: {redact_url(url)}")
