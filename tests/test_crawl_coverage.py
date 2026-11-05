@@ -16,6 +16,7 @@ from hse_lms_harvest.manifest import latest_manifest_path, render_dump_from_mani
 def course_source():
     state = SimpleNamespace(
         links=[1, 2],
+        pages={},
         failed=set(),
         validators=True,
         counts=Counter(),
@@ -51,8 +52,9 @@ def course_source():
                 if root
                 else "<h1>Assignment</h1><p>Required work</p>"
             )
+            html = state.pages.get(self.path, html)
             self.send_response(status)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(html.encode())))
             if state.validators:
                 self.send_header("ETag", '"' + str(hash(html)) + '"')
@@ -105,6 +107,39 @@ def harvest(tmp_path, source, *extra):
     exit_code = asyncio.run(run_harvest(args_for(tmp_path, source, *extra)))
     path = latest_manifest_path(tmp_path / "dumps")
     return exit_code, path, json.loads(path.read_text())
+
+
+def test_course_crawl_reaches_nested_assignment_without_following_forum_section(
+    tmp_path, course_source
+):
+    source = course_source
+    source.pages = {
+        "/course/view.php?id=1": (
+            '<a href="/course/section.php?id=10">Part 1</a>'
+            '<a href="/mod/forum/view.php?id=3">Announcements</a>'
+            '<a href="/mod/page/view.php?id=99">Lecture</a>'
+        ),
+        "/course/section.php?id=10": '<a href="/course/section.php?id=11">Work</a>',
+        "/course/section.php?id=11": '<a href="/mod/assign/view.php?id=7">Assignment</a>',
+        "/mod/assign/view.php?id=7": (
+            "<p>Срок сдачи: 22 декабря</p>"
+            '<a href="/mod/assign/view.php?id=7&amp;action=editsubmission">Добавить ответ на задание</a>'
+        ),
+        "/mod/forum/view.php?id=3": '<a href="/course/section.php?id=999">Other course</a>',
+    }
+
+    args = args_for(tmp_path, source, "--assignments-only")
+    args.visit_action_pages = True
+    assert asyncio.run(run_harvest(args)) == 0
+    manifest = json.loads(latest_manifest_path(tmp_path / "dumps").read_text())
+
+    assert not manifest["coverage"]["scope"]["visit_action_pages"]
+    assignment = next(page for page in manifest["pages"] if page["url"].endswith("id=7"))
+    assert "Срок сдачи: 22 декабря" in assignment["text_lines"]
+    assert source.counts["GET", "/mod/assign/view.php?id=7&action=editsubmission"] == 0
+    assert source.counts["GET", "/mod/page/view.php?id=99"] == 0
+    assert source.url + "/mod/assign/view.php?id=7" in manifest["coverage"]["confirmed_urls"]
+    assert source.counts["GET", "/course/section.php?id=999"] == 0
 
 
 @pytest.mark.parametrize("validators", [True, False])

@@ -233,7 +233,7 @@ async def run_harvest(args: argparse.Namespace) -> int:
     if is_netology_url(args.url) and args.page_concurrency != 1:
         raise RuntimeError("Netology requires --page-concurrency 1 for assignment navigation")
     if args.assignments_only and not is_netology_url(args.url):
-        raise RuntimeError("--assignments-only is supported only for Netology course URLs")
+        args.visit_action_pages = False
     if args.open_netology_assignments and not is_netology_url(args.url):
         raise RuntimeError("--open-netology-assignments is supported only for Netology course URLs")
     if args.resume_dump and (args.resume_latest or args.reuse_dump):
@@ -472,7 +472,17 @@ async def run_harvest(args: argparse.Namespace) -> int:
                     reused_page_count += int(reused)
                     pages.append(capture)
                     pending.remove(url_key)
+                    from_course_outline = urlparse(capture.final_url).path in {
+                        "/course/view.php",
+                        "/course/section.php",
+                    }
                     for link in capture.links:
+                        if (
+                            args.assignments_only
+                            and not from_course_outline
+                            and urlparse(link.url).path == "/course/section.php"
+                        ):
+                            continue
                         link_key = strip_fragment(link.url)
                         if link_key == strip_fragment(capture.final_url):
                             continue

@@ -15,7 +15,7 @@ from playwright.async_api import Error as PlaywrightError
 from .classify import classify_link, is_ignored_capture_url, looks_like_course_link
 from .coverage import capture_contract
 from .debug import DiagnosticRecorder, RunLogger, ScreenshotPolicy, safe_error, save_screenshot
-from .downloads import download_files
+from .downloads import download_files, page_download_links
 from .file_cache import FileCache
 from .manifest import page_content_fingerprint, response_metadata
 from .model import Button, Link, PageCapture
@@ -240,6 +240,17 @@ async def capture_page(
             exc=exc,
         )
     phases["navigation_ms"] = round((time.monotonic() - started) * 1000)
+    if urlparse(url).path == "/course/section.php" and strip_fragment(page.url) != strip_fragment(
+        url
+    ):
+        capture.errors.append("navigation: requested Moodle section did not open")
+        await diagnostics.error(
+            "moodle_section_redirect",
+            "Requested Moodle section did not open",
+            page_index=index,
+            url=url,
+        )
+        return capture
 
     network_idle_timeout_ms = network_idle_timeout_for_url(url, args)
     if network_idle_timeout_ms > 0:
@@ -351,7 +362,7 @@ async def capture_page(
             return await download_files(
                 context,
                 files_dir,
-                capture.links,
+                page_download_links(capture, assignments_only=args.assignments_only),
                 args.url,
                 logger,
                 downloaded_urls,
@@ -658,4 +669,24 @@ def should_queue_link(link: Link, start_url: str, args: argparse.Namespace) -> b
             ):
                 return False
         return link.kind == "page" and looks_like_course_link(link.url, start_url)
+    if getattr(args, "assignments_only", False):
+        if parsed.path == "/course/section.php":
+            section_ids = query.get("id", [])
+            return (
+                link.kind == "page"
+                and len(query) == len(section_ids) == 1
+                and section_ids[0].isascii()
+                and section_ids[0].isdigit()
+            )
+        if parsed.path == "/mod/assign/view.php" and any(
+            action != "view" for action in query.get("action", [])
+        ):
+            return False
+        if parsed.path not in {
+            "/mod/assign/view.php",
+            "/mod/quiz/view.php",
+            "/mod/forum/view.php",
+            "/mod/forum/discuss.php",
+        }:
+            return False
     return looks_like_course_link(link.url, start_url)

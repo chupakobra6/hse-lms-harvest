@@ -9,7 +9,7 @@ from playwright.async_api import Error as PlaywrightError
 
 from .coverage import capture_contract
 from .debug import DiagnosticRecorder, RunLogger, safe_url
-from .downloads import concise_error, download_files
+from .downloads import concise_error, download_files, page_download_links
 from .file_cache import FileCache
 from .manifest import (
     clone_page_for_reuse,
@@ -136,7 +136,7 @@ async def maybe_reuse_page(
         page.downloaded_files = await download_files(
             context,
             out_dir / "files",
-            page.links,
+            page_download_links(page, assignments_only=getattr(args, "assignments_only", False)),
             args.url,
             logger,
             downloaded_urls if downloaded_urls is not None else set(),

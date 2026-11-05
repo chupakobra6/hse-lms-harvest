@@ -21,7 +21,7 @@ from .classify import (
 )
 from .debug import DiagnosticRecorder, RunLogger, safe_error, safe_url
 from .file_cache import FileCache, FileMetadata, metadata_from_headers
-from .model import Link
+from .model import Link, PageCapture
 from .privacy import strip_fragment
 from .sizes import format_bytes
 from .text import stable_slug
@@ -45,6 +45,27 @@ CONTENT_TYPE_EXTENSIONS = {
     "text/markdown": ".md",
     "text/plain": ".txt",
 }
+
+
+def page_download_links(page: PageCapture, *, assignments_only: bool) -> list[Link]:
+    if not assignments_only or urlparse(page.final_url).path not in {
+        "/course/view.php",
+        "/course/section.php",
+    }:
+        return page.links
+    assessment_labels = (
+        "силлабус",
+        "программа дисциплины",
+        "критерии оценивания",
+        "задание",
+        "аттестация",
+        "экзамен",
+    )
+    return [
+        link
+        for link in page.links
+        if any(label in link.text.casefold() for label in assessment_labels)
+    ]
 
 
 async def download_files(

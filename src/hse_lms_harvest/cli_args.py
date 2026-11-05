@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     harvest.add_argument(
         "--assignments-only",
         action="store_true",
-        help="On Netology, follow the course schedule, practice index and open assignment pages only.",
+        help="Follow assessments and their sections or announcements in Moodle, or schedule and practice in Netology.",
     )
     harvest.add_argument(
         "--open-netology-assignments",
