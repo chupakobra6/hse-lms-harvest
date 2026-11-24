@@ -35,6 +35,21 @@ def test_harvest_opens_action_pages_by_default() -> None:
     assert args.visit_action_pages is True
 
 
+@pytest.mark.parametrize(
+    ("arguments", "default"),
+    [
+        (["harvest", "--url", "about:blank"], True),
+        (["club404-export", "--profile", "p", "--subject", "s", "--out", "o"], True),
+        (["login", "--url", "about:blank"], False),
+    ],
+)
+def test_browser_display_modes(arguments: list[str], default: bool) -> None:
+    parser = build_parser()
+    assert parser.parse_args(arguments).headless is default
+    assert parser.parse_args([*arguments, "--headed"]).headless is False
+    assert parser.parse_args([*arguments, "--headless"]).headless is True
+
+
 def test_harvest_can_skip_action_pages_explicitly() -> None:
     parser = build_parser()
 

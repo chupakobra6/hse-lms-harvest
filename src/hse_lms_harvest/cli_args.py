@@ -45,11 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     club404.add_argument("--profile", required=True, type=Path)
     club404.add_argument("--subject", required=True, action="append", dest="subjects")
     club404.add_argument("--out", required=True, type=Path)
-    club404.add_argument("--headless", action="store_true")
+    add_display_args(club404, headless=True)
     club404.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
 
     harvest = subparsers.add_parser("harvest", help="Capture course pages and attachments.")
-    add_browser_args(harvest)
+    add_browser_args(harvest, headless=True)
     harvest.add_argument("--url", required=True, help="Course or assignment URL to start from.")
     harvest.add_argument(
         "--assignments-only",
@@ -373,7 +373,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def add_browser_args(parser: argparse.ArgumentParser) -> None:
+def add_display_args(parser: argparse.ArgumentParser, *, headless: bool) -> None:
+    display = parser.add_mutually_exclusive_group()
+    display.add_argument(
+        "--headless",
+        dest="headless",
+        action="store_true",
+        help="Run without a visible browser window.",
+    )
+    display.add_argument(
+        "--headed",
+        dest="headless",
+        action="store_false",
+        help="Show the browser window for manual interaction.",
+    )
+    parser.set_defaults(headless=headless)
+
+
+def add_browser_args(parser: argparse.ArgumentParser, *, headless: bool = False) -> None:
     parser.add_argument(
         "--profile",
         default=str(DEFAULT_PROFILE_DIR),
@@ -384,9 +401,7 @@ def add_browser_args(parser: argparse.ArgumentParser) -> None:
         default="chrome",
         help="Installed browser channel to use. Use 'chromium' after running playwright install.",
     )
-    parser.add_argument(
-        "--headless", action="store_true", help="Run without a visible browser window."
-    )
+    add_display_args(parser, headless=headless)
     parser.add_argument(
         "--slow-mo", type=int, default=0, help="Playwright slow motion in milliseconds."
     )

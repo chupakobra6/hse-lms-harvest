@@ -619,14 +619,14 @@ async def ensure_logged_in(
                 return
         logger.log("auto-login requested but stored credentials were not available")
 
-        if args.headless:
-            await diagnostics.error(
-                "auto_login_unavailable",
-                "Headless auto-login did not establish a session; repair credentials or the login flow",
-            )
-            raise CredentialError(
-                "Headless auto-login failed; manual login cannot run in background."
-            )
+    if args.headless:
+        await diagnostics.error(
+            "auto_login_unavailable" if args.auto_login else "login_unavailable",
+            "Login required in headless mode; use login or --headed for manual interaction",
+        )
+        raise CredentialError(
+            "Login required in headless mode; run login or use --headed for manual interaction."
+        )
 
     logger.log("manual login is needed; waiting in the same browser session")
     logged_in_page = await wait_for_logged_in(context, start_url, args.auth_timeout)

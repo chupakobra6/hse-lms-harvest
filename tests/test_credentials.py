@@ -354,3 +354,31 @@ def test_headless_login_does_not_wait_for_manual_auth_when_secret_unavailable(
         )
     manual_wait.assert_not_awaited()
     diagnostics.error.assert_awaited_once()
+
+
+def test_headless_login_without_auto_login_fails_without_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = SimpleNamespace(goto=AsyncMock(), wait_for_load_state=AsyncMock())
+    diagnostics = SimpleNamespace(error=AsyncMock())
+    manual_wait = AsyncMock()
+    monkeypatch.setattr(cli, "page_looks_logged_in", AsyncMock(return_value=False))
+    monkeypatch.setattr(cli, "maybe_click_login", AsyncMock())
+    monkeypatch.setattr(cli, "save_screenshot", AsyncMock())
+    monkeypatch.setattr(cli, "wait_for_logged_in", manual_wait)
+    args = cli.build_parser().parse_args(["harvest", "--url", "about:blank"])
+    with pytest.raises(credentials.CredentialError, match="--headed"):
+        asyncio.run(
+            cli.ensure_logged_in(
+                SimpleNamespace(),
+                page,
+                "about:blank",
+                args,
+                tmp_path,
+                SimpleNamespace(log=Mock()),
+                None,
+                diagnostics,
+            )
+        )
+    manual_wait.assert_not_awaited()
+    diagnostics.error.assert_awaited_once()
